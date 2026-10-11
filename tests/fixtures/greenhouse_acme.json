@@ -1,0 +1,127 @@
+{
+ "jobs": [
+  {
+   "id": 1001,
+   "title": "Backend Engineer Intern",
+   "absolute_url": "https://boards.greenhouse.io/acme/jobs/1001",
+   "location": {
+    "name": "Bengaluru"
+   },
+   "updated_at": "2026-10-01T10:00:00-04:00",
+   "first_published": "2026-09-28T10:00:00-04:00",
+   "company_name": "Acme India",
+   "departments": [
+    {
+     "id": 1,
+     "name": "Engineering",
+     "child_ids": [],
+     "parent_id": null
+    }
+   ],
+   "offices": [
+    {
+     "id": 2,
+     "name": "Bangalore",
+     "location": null,
+     "child_ids": [],
+     "parent_id": null
+    }
+   ],
+   "content": "&lt;p&gt;Join our payments platform team for a 6-month internship starting January 2027.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Build REST APIs in Python with FastAPI&lt;/li&gt;&lt;li&gt;Work with PostgreSQL, AWS Lambda and S3&lt;/li&gt;&lt;li&gt;Open to 2027 graduates&lt;/li&gt;&lt;/ul&gt;"
+  },
+  {
+   "id": 1002,
+   "title": "Senior Backend Engineer",
+   "absolute_url": "https://boards.greenhouse.io/acme/jobs/1002",
+   "location": {
+    "name": "Bengaluru"
+   },
+   "updated_at": "2026-10-01T10:00:00-04:00",
+   "company_name": "Acme India",
+   "departments": [],
+   "offices": [],
+   "content": "&lt;p&gt;5+ years of experience with Python and microservices.&lt;/p&gt;"
+  },
+  {
+   "id": 1003,
+   "title": "Software Engineer",
+   "absolute_url": "https://boards.greenhouse.io/acme/jobs/1003",
+   "location": {
+    "name": "Hyderabad"
+   },
+   "updated_at": "2026-10-01T10:00:00-04:00",
+   "company_name": "Acme India",
+   "departments": [],
+   "offices": [],
+   "content": "&lt;p&gt;You have 3+ years of experience building backend services in Python.&lt;/p&gt;"
+  },
+  {
+   "id": 1004,
+   "title": "Executive, Finance",
+   "absolute_url": "https://boards.greenhouse.io/acme/jobs/1004",
+   "location": {
+    "name": "Bengaluru"
+   },
+   "updated_at": "2026-10-01T10:00:00-04:00",
+   "company_name": "Acme India",
+   "departments": [],
+   "offices": [],
+   "content": "&lt;p&gt;Own month-end close.&lt;/p&gt;"
+  },
+  {
+   "id": 1005,
+   "title": "Software Engineer - New Grad",
+   "absolute_url": "https://boards.greenhouse.io/acme/jobs/1005",
+   "location": {
+    "name": "Remote - India"
+   },
+   "updated_at": "2026-10-02T10:00:00-04:00",
+   "company_name": "Acme India",
+   "departments": [],
+   "offices": [],
+   "content": "&lt;p&gt;Build full stack features with Node.js, Express, MongoDB and React. REST APIs, AWS, Git.&lt;/p&gt;"
+  },
+  {
+   "id": 1006,
+   "title": "Cloud Engineer",
+   "absolute_url": "https://boards.greenhouse.io/acme/jobs/1006",
+   "location": {
+    "name": "Remote - US"
+   },
+   "updated_at": "2026-10-02T10:00:00-04:00",
+   "company_name": "Acme India",
+   "departments": [],
+   "offices": [],
+   "content": "&lt;p&gt;AWS, Lambda, serverless. New grads welcome.&lt;/p&gt;"
+  },
+  {
+   "id": 1007,
+   "title": "Software Engineer, Backend (New Grad)",
+   "absolute_url": "https://boards.greenhouse.io/acme/jobs/1007",
+   "location": {
+    "name": "Berlin, Germany"
+   },
+   "updated_at": "2026-10-02T10:00:00-04:00",
+   "company_name": "Acme India",
+   "departments": [],
+   "offices": [],
+   "content": "&lt;p&gt;Python, PostgreSQL, AWS, microservices. We offer visa sponsorship and relocation support.&lt;/p&gt;"
+  },
+  {
+   "id": 1008,
+   "title": "Software Engineer (Graduate)",
+   "absolute_url": "https://boards.greenhouse.io/acme/jobs/1008",
+   "location": {
+    "name": "London, UK"
+   },
+   "updated_at": "2026-10-02T10:00:00-04:00",
+   "company_name": "Acme India",
+   "departments": [],
+   "offices": [],
+   "content": "&lt;p&gt;Python, REST APIs. Candidates must be authorized to work in the UK; we do not offer visa sponsorship.&lt;/p&gt;"
+  }
+ ],
+ "meta": {
+  "total": 8
+ }
+}

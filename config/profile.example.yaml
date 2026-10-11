@@ -1,0 +1,211 @@
+# ApplyFlow profile
+# -----------------
+# Copy this file to config/profile.yaml and edit it. profile.yaml is gitignored,
+# so your personal details never end up in the repository.
+#
+# Everything the pipeline decides (which roles count, how they're scored, which
+# tier they land in) comes from this file. When your resume changes - say you add
+# a Spring Boot project - update the skills here and re-run `applyflow score`.
+
+candidate:
+  name: "Your Name"
+  email: "you@example.com"          # used later as the sender; optional for Step 1
+  resume_url: ""                    # hosted PDF link, used in Phase 2 emails
+  graduation: "2027-05"
+  internship_available_from: "2027-01"
+  # Optional: identifies you in the HTTP User-Agent so site operators can reach you.
+  contact_for_user_agent: ""
+
+# ---------------------------------------------------------------------------
+# Tracks: which kinds of openings you want.
+# ---------------------------------------------------------------------------
+tracks:
+  internship: true
+  new_grad: true
+  # Roles that mention neither internship nor new-grad (e.g. plain "Software
+  # Engineer") are kept but scored lower, since many are secretly mid-level.
+  unspecified: true
+
+# ---------------------------------------------------------------------------
+# Role families. Tier weight multiplies the skill score.
+#   primary   = where your resume is strongest
+#   secondary = good fit, slightly different pitch
+#   stretch   = test with a small batch, let reply data decide
+# Patterns are matched case-insensitively against the job title (first) and
+# then the description. Order matters: the first family that matches wins.
+# ---------------------------------------------------------------------------
+role_families:
+  - name: ai_application
+    tier: secondary
+    title_patterns: ["ai engineer", "applied ai", "llm", "genai", "gen ai", "generative ai", "ai/ml engineer", "ai developer", "agentic", "ai agents", "ai platform"]
+    lead_project: "Judicial AI System"
+  - name: cloud
+    tier: primary
+    title_patterns: ["cloud engineer", "serverless", "cloud developer", "aws engineer"]
+    lead_project: "Serverless FileFinder"
+  - name: backend
+    tier: primary
+    title_patterns: ["backend", "back-end", "back end", "python developer", "python engineer", "api engineer", "server engineer", "node.js developer", "nodejs developer"]
+    lead_project: "CareerForge AI"
+  - name: fullstack
+    tier: secondary
+    title_patterns: ["full stack", "full-stack", "fullstack"]
+    lead_project: "CareerForge AI"
+  - name: ml
+    tier: stretch
+    title_patterns: ["machine learning", "ml engineer", "nlp", "mlops"]
+    lead_project: "Judicial AI System"
+  - name: data
+    tier: stretch
+    title_patterns: ["data engineer", "analytics engineer", "etl"]
+    lead_project: "Judicial AI System"
+  - name: platform
+    tier: stretch
+    title_patterns: ["devops", "site reliability", "sre", "platform engineer", "infrastructure engineer"]
+    lead_project: "Serverless FileFinder"
+  - name: sde_generic
+    tier: primary
+    title_patterns: ["software engineer", "software developer", "software development engineer", "sde", "swe", "member of technical staff", "product engineer", "developer", "engineer intern", "engineering intern", "programmer"]
+    lead_project: "CareerForge AI"
+
+family_tier_weights:
+  primary: 1.0
+  secondary: 0.85
+  stretch: 0.6
+
+# ---------------------------------------------------------------------------
+# Title filters. Matched as whole words, case-insensitive.
+# ---------------------------------------------------------------------------
+title_exclude:
+  - senior
+  - sr
+  - lead
+  - staff
+  - principal
+  - architect
+  - manager
+  - director
+  - head of
+  - vp
+  - sde 2
+  - sde ii
+  - sde-2
+  - sde-ii
+  - sde iii
+  - sde 3
+  - sde iv
+  - engineer ii
+  - engineer iii
+  - engineer 2
+  - engineer 3
+  - frontend
+  - front-end
+  - front end
+  - android
+  - ios
+  - mobile
+  - data scientist
+  - research scientist
+  - embedded
+  - firmware
+  - hardware
+  - qa
+  - test engineer
+  - sdet
+  - solutions engineer
+  - sales engineer
+  - support engineer
+
+# ---------------------------------------------------------------------------
+# Experience. Openings requiring more than this many years are rejected.
+# ---------------------------------------------------------------------------
+max_years_required: 1
+
+# ---------------------------------------------------------------------------
+# Locations. Matching is case-insensitive substring on the location text.
+# ---------------------------------------------------------------------------
+locations:
+  preferred_india: ["bangalore", "bengaluru", "hyderabad", "gurgaon", "gurugram", "delhi", "new delhi", "noida", "ncr"]
+  other_india: ["india", "pune", "mumbai", "chennai", "kolkata", "ahmedabad", "jaipur", "kochi", "lucknow"]
+  accept_other_india: true
+  # Remote roles are accepted when they're open to India or worldwide.
+  remote_open_markers: ["india", "anywhere", "worldwide", "global", "apac", "asia"]
+  # Remote roles restricted to these regions are rejected.
+  remote_restricted_markers: ["us", "usa", "u.s.", "united states", "canada", "north america", "americas", "amer", "europe", "eu", "emea", "uk", "united kingdom", "latam", "australia", "germany", "france"]
+  # Onsite roles abroad are only kept when the posting signals visa sponsorship.
+  abroad_requires_sponsorship: true
+
+# ---------------------------------------------------------------------------
+# Skills, matched as whole words against title + description.
+# Weights are relative; negative weights pull a role down.
+# ---------------------------------------------------------------------------
+skills:
+  heavy:            # weight 3
+    - python
+    - fastapi
+    - flask
+    - node.js
+    - nodejs
+    - express
+    - rest api
+    - rest apis
+    - restful
+    - api
+    - apis
+    - aws
+    - lambda
+    - serverless
+    - postgresql
+    - postgres
+    - microservices
+    - backend
+  medium:           # weight 2
+    - sql
+    - mysql
+    - mongodb
+    - dynamodb
+    - s3
+    - react
+    - javascript
+    - java
+    - nlp
+    - llm
+    - llms
+    - neo4j
+    - sqlalchemy
+    - jwt
+    - event-driven
+    - distributed systems
+    - system design
+  light:            # weight 1
+    - git
+    - linux
+    - docker
+    - cloud
+    - typescript
+    - machine learning
+    - data structures
+    - algorithms
+  negative:         # weight -3: core requirements you don't have yet
+    - golang
+    - rust
+    - scala
+    - kotlin
+    - swift
+    - spring boot
+    - c#
+    - .net
+    - ruby on rails
+    - elixir
+  skill_score_cap: 30   # raw points that count as a "perfect" skill match
+
+# ---------------------------------------------------------------------------
+# Scoring thresholds (0-100).
+# ---------------------------------------------------------------------------
+tiers:
+  A: 70
+  B: 45
+
+# Boards with more open jobs than this are treated as large companies:
+# apply through their system rather than cold-email.
+large_company_job_count: 60

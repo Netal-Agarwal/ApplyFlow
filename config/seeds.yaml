@@ -1,0 +1,46 @@
+# Seed companies and the applicant-tracking system (ATS) their job board runs on.
+#
+# Each entry needs:
+#   name:  display name
+#   ats:   greenhouse | lever | ashby
+#   slug:  the board identifier in the ATS URL, e.g.
+#            boards.greenhouse.io/<slug>, jobs.lever.co/<slug>, jobs.ashbyhq.com/<slug>
+#
+# Every board below was checked live on 2026-10-11. Boards move or close, so run
+# `python -m applyflow verify-seeds` now and then; `python -m applyflow probe "Company"`
+# finds the board for a new company and can add it here for you.
+#
+# This list leans towards companies with Indian offices or remote roles. Big
+# companies mostly list experienced roles, so expect most of their postings to be
+# filtered out - that's the filters working, not a bug.
+
+companies:
+  # --- Greenhouse ---
+  - {name: Razorpay, ats: greenhouse, slug: razorpaysoftwareprivatelimited}
+  - {name: Groww, ats: greenhouse, slug: groww}
+  - {name: InMobi, ats: greenhouse, slug: inmobi}
+  - {name: Druva, ats: greenhouse, slug: druva}
+  - {name: Rubrik, ats: greenhouse, slug: rubrik}
+  - {name: Databricks, ats: greenhouse, slug: databricks}
+  - {name: MongoDB, ats: greenhouse, slug: mongodb}
+  - {name: Cloudflare, ats: greenhouse, slug: cloudflare}
+  - {name: GitLab, ats: greenhouse, slug: gitlab}
+  - {name: Stripe, ats: greenhouse, slug: stripe}
+  - {name: Coinbase, ats: greenhouse, slug: coinbase}
+  - {name: Twilio, ats: greenhouse, slug: twilio}
+  - {name: Vercel, ats: greenhouse, slug: vercel}
+
+  # --- Lever ---
+  - {name: CRED, ats: lever, slug: cred}
+  - {name: Meesho, ats: lever, slug: meesho}
+  - {name: Palantir, ats: lever, slug: palantir}
+
+  # --- Ashby ---
+  - {name: Sarvam AI, ats: ashby, slug: sarvam}
+  - {name: Atlan, ats: ashby, slug: atlan}
+  - {name: Ramp, ats: ashby, slug: ramp}
+  - {name: Notion, ats: ashby, slug: notion}
+  - {name: PostHog, ats: ashby, slug: posthog}
+  - {name: Supabase, ats: ashby, slug: supabase}
+  - {name: Linear, ats: ashby, slug: linear}
+  - {name: Cohere, ats: ashby, slug: cohere}

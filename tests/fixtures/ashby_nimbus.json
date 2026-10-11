@@ -1,0 +1,55 @@
+{
+ "jobs": [
+  {
+   "id": "c1",
+   "title": " Founding Backend Engineer",
+   "department": "Engineering",
+   "team": "Backend",
+   "employmentType": "FullTime",
+   "location": "Remote (Worldwide)",
+   "secondaryLocations": [],
+   "publishedAt": "2026-10-05T12:00:00.000+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Remote",
+   "jobUrl": "https://jobs.ashbyhq.com/nimbus/c1",
+   "applyUrl": "https://jobs.ashbyhq.com/nimbus/c1/application",
+   "descriptionPlain": "0-1 years of experience is fine. Python, FastAPI, PostgreSQL, AWS, LLM pipelines, REST APIs."
+  },
+  {
+   "id": "c2",
+   "title": "AI Engineer",
+   "department": "Engineering",
+   "team": "",
+   "employmentType": "FullTime",
+   "location": "New York, NY (HQ)",
+   "secondaryLocations": [
+    {
+     "location": "Remote (US)",
+     "address": {
+      "postalAddress": {
+       "addressCountry": "United States"
+      }
+     }
+    }
+   ],
+   "publishedAt": "2026-10-05T12:00:00.000+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Hybrid",
+   "jobUrl": "https://jobs.ashbyhq.com/nimbus/c2",
+   "applyUrl": "https://jobs.ashbyhq.com/nimbus/c2/application",
+   "descriptionPlain": "LLM agents in Python."
+  },
+  {
+   "id": "c3",
+   "title": "Backend Engineer (unlisted)",
+   "department": "Engineering",
+   "location": "Remote (Worldwide)",
+   "isListed": false,
+   "isRemote": true,
+   "jobUrl": "https://jobs.ashbyhq.com/nimbus/c3",
+   "descriptionPlain": "hidden"
+  }
+ ]
+}
