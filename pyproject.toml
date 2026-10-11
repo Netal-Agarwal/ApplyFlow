@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "applyflow"
+version = "0.1.0"
+description = "An agentic pipeline that finds relevant openings, researches target companies, and drafts personalized outreach to hiring managers and recruiters, with human review before sending."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["requests>=2.31", "PyYAML>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+applyflow = "applyflow.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["applyflow*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,37 @@
+{
+ "hits": [
+  {
+   "objectID": "50001",
+   "parent_id": 49922569,
+   "story_id": 49922569,
+   "author": "acme",
+   "created_at": "2026-10-02T10:00:00Z",
+   "comment_text": "Lumen AI | Backend Engineer, Interns | Remote (India OK) | Full-time | https:&#x2F;&#x2F;lumen.ai<p>We build LLM tooling in Python and FastAPI on AWS, with PostgreSQL. New grads welcome.<p>Email jobs [at] lumen [dot] ai with your resume."
+  },
+  {
+   "objectID": "50002",
+   "parent_id": 49922569,
+   "story_id": 49922569,
+   "author": "bigco",
+   "created_at": "2026-10-02T11:00:00Z",
+   "comment_text": "BigCo | Senior Staff Engineer | San Francisco, CA (onsite) | $250k<p>10+ years of experience."
+  },
+  {
+   "objectID": "50003",
+   "parent_id": 50001,
+   "story_id": 49922569,
+   "author": "someone",
+   "created_at": "2026-10-02T12:00:00Z",
+   "comment_text": "Is this open to people in Europe?"
+  },
+  {
+   "objectID": "50004",
+   "parent_id": 49922569,
+   "story_id": 49922569,
+   "author": "foo",
+   "created_at": "2026-10-02T13:00:00Z",
+   "comment_text": "Foo Corp | Software Engineer | Remote (US only) | Full-time<p>Python, Django."
+  }
+ ],
+ "nbPages": 1
+}

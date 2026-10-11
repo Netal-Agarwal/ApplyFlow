@@ -1,0 +1,50 @@
+[
+ {
+  "id": "aaaa-1111",
+  "text": "SDE Intern - Backend",
+  "categories": {
+   "commitment": "Internship",
+   "department": "Engineering",
+   "location": "bengaluru",
+   "team": "Platform",
+   "allLocations": [
+    "bengaluru"
+   ]
+  },
+  "createdAt": 1790573982021,
+  "descriptionPlain": "We are hiring backend interns for January 2027.",
+  "description": "<div>We are hiring backend interns.</div>",
+  "lists": [
+   {
+    "text": "What you'll do",
+    "content": "<li>Build Node.js and Express services</li><li>Write SQL against MySQL</li>"
+   }
+  ],
+  "additional": "",
+  "additionalPlain": "Questions? Write to campus@zeta-example.com",
+  "hostedUrl": "https://jobs.lever.co/zeta/aaaa-1111",
+  "applyUrl": "https://jobs.lever.co/zeta/aaaa-1111/apply",
+  "workplaceType": "on-site",
+  "country": "IN"
+ },
+ {
+  "id": "bbbb-2222",
+  "text": "Product Designer",
+  "categories": {
+   "commitment": "full time",
+   "department": "Design",
+   "location": "bengaluru",
+   "team": "design",
+   "allLocations": [
+    "bengaluru"
+   ]
+  },
+  "createdAt": 1790573982021,
+  "descriptionPlain": "Design things.",
+  "lists": [],
+  "additionalPlain": "",
+  "hostedUrl": "https://jobs.lever.co/zeta/bbbb-2222",
+  "applyUrl": "https://jobs.lever.co/zeta/bbbb-2222/apply",
+  "workplaceType": "hybrid"
+ }
+]
