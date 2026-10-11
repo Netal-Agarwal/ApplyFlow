@@ -28,7 +28,8 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 
-cp config/profile.example.yaml config/profile.yaml   # then edit it (gitignored)
+cp config/profile.example.yaml config/profile.yaml   # Windows: copy config\profile.example.yaml config\profile.yaml
+# then edit config/profile.yaml (it's gitignored)
 
 python -m applyflow run            # collect + score + report
 ```
