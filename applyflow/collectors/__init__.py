@@ -4,11 +4,13 @@ from applyflow.collectors.ashby import AshbyCollector
 from applyflow.collectors.greenhouse import GreenhouseCollector
 from applyflow.collectors.hn import HNWhoIsHiringCollector
 from applyflow.collectors.lever import LeverCollector
+from applyflow.collectors.workable import WorkableCollector
 
 ATS_COLLECTORS = {
     "greenhouse": GreenhouseCollector,
     "lever": LeverCollector,
     "ashby": AshbyCollector,
+    "workable": WorkableCollector,
 }
 
 __all__ = [
@@ -17,4 +19,5 @@ __all__ = [
     "GreenhouseCollector",
     "HNWhoIsHiringCollector",
     "LeverCollector",
+    "WorkableCollector",
 ]

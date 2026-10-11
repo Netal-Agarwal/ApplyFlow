@@ -1,6 +1,7 @@
 """Filtering and scoring: decide whether an opening fits, how well, and what to do about it.
 
-Score (0-100) = family_weight x (skills 0-50 + location 0-20 + track 0-20 + experience 0-10)
+Score (0-100) = family_weight x (skills 0-50 + location 0-20 + track 0-20 + experience 0-10
+                                 + startup bonus), capped at 100
 
 Every decision appends a human-readable reason, so `applyflow explain <job>` can
 show exactly why something was kept, tiered or rejected. That's what makes the
@@ -235,6 +236,29 @@ def _reject(job: Job, reason: str, **fields) -> ScoreResult:
     return ScoreResult(job_id=job.id, accepted=False, score=0, tier="rejected", reasons=[reason], **fields)
 
 
+def is_startup(job: Job, profile: Profile) -> bool:
+    cfg = profile.startup
+    if job.team_size is not None:
+        return job.team_size <= int(cfg["max_team_size"])
+    return job.board_size is not None and job.board_size <= int(cfg["small_board_job_count"])
+
+
+def contact_hint(job: Job, profile: Profile) -> str:
+    """Who Phase 2 should look for at this company."""
+    cfg = profile.startup
+    if job.source == "hn" and job.emails:
+        return "the email in the post"
+    small = (
+        job.team_size is not None and job.team_size <= int(cfg["founder_contact_max_team_size"])
+    ) or (job.team_size is None and job.board_size is not None
+          and job.board_size <= int(cfg["small_board_job_count"]))
+    if small:
+        return "founder or CTO"
+    if job.team_size is not None and job.team_size <= int(cfg["max_team_size"]):
+        return "engineering manager or tech lead"
+    return "recruiter or engineering manager"
+
+
 def decide_action(job: Job, location_class: str, profile: Profile) -> str:
     if job.source == "hn":
         return "email" if job.emails else "apply"
@@ -302,8 +326,14 @@ def score_job(job: Job, profile: Profile) -> ScoreResult:
         experience_points = 10
         reasons.append(f"experience: {years} year(s) asked -> 10/10")
 
+    startup_points = 0
+    if is_startup(job, profile):
+        startup_points = int(profile.startup["score_bonus"])
+        size = f"{job.team_size} people" if job.team_size is not None else f"{job.board_size} open roles"
+        reasons.append(f"startup ({size}) -> +{startup_points}")
+
     weight = profile.family_tier_weights[family.tier]
-    total = (skill_points + location_points + track_points + experience_points) * weight
+    total = (skill_points + location_points + track_points + experience_points + startup_points) * weight
     score = int(round(max(0.0, min(100.0, total))))
     if weight != 1.0:
         reasons.append(f"{family.tier} family weight x{weight}")
@@ -323,6 +353,7 @@ def score_job(job: Job, profile: Profile) -> ScoreResult:
         score=score,
         tier=tier,
         action=decide_action(job, location_class, profile),
+        contact_hint=contact_hint(job, profile),
         lead_project=family.lead_project,
         matched_skills=positives,
         reasons=reasons,

@@ -22,9 +22,20 @@ def example_profile():
 class FakeClient:
     """Stands in for PoliteClient: maps URL endings to fixture payloads."""
 
-    def __init__(self, routes: dict[str, object]):
+    def __init__(self, routes: dict[str, object], pages: dict[str, object] | None = None):
         self.routes = routes
+        self.pages = pages or {}           # exact URL -> HTML (or an exception to raise)
         self.calls: list[tuple[str, dict | None]] = []
+        self.page_calls: list[str] = []
+
+    def get_page(self, url: str) -> str:
+        self.page_calls.append(url)
+        page = self.pages.get(url)
+        if page is None:
+            raise FetchError(url, "HTTP 404", 404)
+        if isinstance(page, Exception):
+            raise page
+        return page
 
     def get_json(self, url: str, params: dict | None = None):
         self.calls.append((url, params))

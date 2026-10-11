@@ -131,7 +131,7 @@ class HttpTests(unittest.TestCase):
         def __init__(self, responses):
             self.responses, self.headers, self.calls = list(responses), {}, 0
 
-        def get(self, url, params=None, timeout=None):
+        def get(self, url, params=None, timeout=None, headers=None):
             self.calls += 1
             return self.responses.pop(0)
 

@@ -20,8 +20,24 @@ SEEDS_PATH = CONFIG_DIR / "seeds.yaml"
 DEFAULT_DB_PATH = ROOT / "data" / "applyflow.db"
 OUTPUT_DIR = ROOT / "output"
 
-SUPPORTED_ATS = ("greenhouse", "lever", "ashby")
+SUPPORTED_ATS = ("greenhouse", "lever", "ashby", "workable")
 SKILL_WEIGHTS = {"heavy": 3, "medium": 2, "light": 1, "negative": -3}
+
+DEFAULT_STARTUP = {
+    "max_team_size": 300,              # at or below this headcount counts as a startup
+    "score_bonus": 6,                  # points added for startups
+    "founder_contact_max_team_size": 50,
+    "small_board_job_count": 15,       # boards this small suggest a small company when headcount is unknown
+}
+DEFAULT_DISCOVERY = {
+    "recheck_days": 30,
+    "yc": {
+        "statuses": ["Active"],
+        "min_team_size": 2,
+        "max_team_size": 1000,
+        "regions_any": ["India", "Remote"],
+    },
+}
 
 
 class ConfigError(ValueError):
@@ -49,6 +65,8 @@ class Profile:
     skill_score_cap: int
     tiers: dict[str, int]
     large_company_job_count: int
+    startup: dict[str, Any] = field(default_factory=dict)
+    discovery: dict[str, Any] = field(default_factory=dict)
     source_path: Path = field(default=PROFILE_PATH)
 
     @property
@@ -104,6 +122,8 @@ def parse_profile(data: dict[str, Any], source_path: Path = PROFILE_PATH) -> Pro
         skill_score_cap=int(raw_skills.get("skill_score_cap", 30)),
         tiers=tiers,
         large_company_job_count=int(data.get("large_company_job_count", 60)),
+        startup={**DEFAULT_STARTUP, **(data.get("startup") or {})},
+        discovery={**DEFAULT_DISCOVERY, **(data.get("discovery") or {})},
         source_path=source_path,
     )
 
@@ -140,7 +160,12 @@ def load_seeds(path: Path = SEEDS_PATH) -> list[Company]:
         if (ats, slug) in seen:
             continue
         seen.add((ats, slug))
-        companies.append(Company(name=str(raw.get("name") or slug), ats=ats, slug=slug))
+        size = raw.get("team_size")
+        companies.append(Company(
+            name=str(raw.get("name") or slug), ats=ats, slug=slug,
+            team_size=int(size) if isinstance(size, (int, float)) else None,
+            website=str(raw.get("website") or ""),
+        ))
     return companies
 
 

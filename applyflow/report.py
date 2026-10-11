@@ -24,7 +24,7 @@ LOCATION_LABELS = {
 }
 CSV_FIELDS = [
     "tier", "score", "company", "title", "track", "family", "location", "location_class",
-    "action", "lead_project", "emails", "url", "apply_url", "source", "posted_at", "id",
+    "action", "contact_hint", "team_size", "lead_project", "emails", "url", "apply_url", "source", "posted_at", "id",
 ]
 
 
@@ -39,6 +39,8 @@ def _row_dict(row: Row) -> dict[str, str]:
         "location": " | ".join(json.loads(row["locations"] or "[]")),
         "location_class": row["location_class"],
         "action": row["action"],
+        "contact_hint": row["contact_hint"] or "",
+        "team_size": "" if row["team_size"] is None else str(row["team_size"]),
         "lead_project": row["lead_project"] or "",
         "emails": ", ".join(json.loads(row["emails"] or "[]")),
         "url": row["url"] or "",
@@ -47,6 +49,26 @@ def _row_dict(row: Row) -> dict[str, str]:
         "posted_at": (row["posted_at"] or "")[:10],
         "id": row["id"],
     }
+
+
+COMPANY_FIELDS = ["name", "website", "team_size", "locations", "board", "description", "batch", "source"]
+
+
+def write_companies_csv(rows: list[Row], path: Path) -> Path:
+    """Hiring companies whose board we can't read - direct-outreach candidates."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=COMPANY_FIELDS)
+        writer.writeheader()
+        for r in rows:
+            writer.writerow({
+                "name": r["name"], "website": r["website"] or "",
+                "team_size": "" if r["team_size"] is None else r["team_size"],
+                "locations": r["locations"] or "",
+                "board": r["ats"] if r["board_status"] == "unsupported" else "none found",
+                "description": r["description"] or "", "batch": r["batch"] or "", "source": r["source"],
+            })
+    return path
 
 
 def write_csv(rows: list[Row], path: Path) -> Path:
@@ -131,6 +153,10 @@ def write_html(rows: list[Row], path: Path, stats: dict[str, object] | None = No
             tags.append(f'<span class="tag">{e(d["location"][:80])}</span>')
         if d["emails"]:
             tags.append(f'<span class="tag">✉ {e(d["emails"])}</span>')
+        if d["team_size"]:
+            tags.append(f'<span class="tag">{e(d["team_size"])} people</span>')
+        if d["contact_hint"]:
+            tags.append(f'<span class="tag">contact: {e(d["contact_hint"])}</span>')
         if d["lead_project"]:
             tags.append(f'<span class="tag">lead with: {e(d["lead_project"])}</span>')
         cards.append(
