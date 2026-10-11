@@ -1,0 +1,125 @@
+[
+ {
+  "id": 1,
+  "name": "Tiny Labs",
+  "slug": "tiny-labs",
+  "website": "https://tinylabs.example",
+  "all_locations": "Bengaluru, KA, India",
+  "regions": [
+   "India",
+   "South Asia"
+  ],
+  "team_size": 12,
+  "isHiring": true,
+  "status": "Active",
+  "batch": "Summer 2024",
+  "one_liner": "AI copilots for clinics"
+ },
+ {
+  "id": 2,
+  "name": "Keka Co",
+  "slug": "keka-co",
+  "website": "kekaco.example",
+  "all_locations": "Gurugram, HR, India",
+  "regions": [
+   "India"
+  ],
+  "team_size": 40,
+  "isHiring": true,
+  "status": "Active",
+  "batch": "Winter 2023",
+  "one_liner": "Payroll"
+ },
+ {
+  "id": 3,
+  "name": "Remote Rocket",
+  "slug": "remote-rocket",
+  "website": "https://rocket.example",
+  "all_locations": "San Francisco, CA, USA",
+  "regions": [
+   "United States of America",
+   "Remote",
+   "Fully Remote"
+  ],
+  "team_size": 25,
+  "isHiring": true,
+  "status": "Active",
+  "batch": "Fall 2024",
+  "one_liner": "Dev tools"
+ },
+ {
+  "id": 4,
+  "name": "Big Public",
+  "slug": "big-public",
+  "website": "https://big.example",
+  "all_locations": "Bengaluru, India",
+  "regions": [
+   "India"
+  ],
+  "team_size": 5000,
+  "isHiring": true,
+  "status": "Public",
+  "batch": "S10",
+  "one_liner": "Huge"
+ },
+ {
+  "id": 5,
+  "name": "SF Only",
+  "slug": "sf-only",
+  "website": "https://sf.example",
+  "all_locations": "San Francisco, CA, USA",
+  "regions": [
+   "United States of America"
+  ],
+  "team_size": 8,
+  "isHiring": true,
+  "status": "Active",
+  "batch": "S25",
+  "one_liner": "x"
+ },
+ {
+  "id": 6,
+  "name": "Dead Co",
+  "slug": "dead-co",
+  "website": "https://dead.example",
+  "all_locations": "Pune, India",
+  "regions": [
+   "India"
+  ],
+  "team_size": 10,
+  "isHiring": true,
+  "status": "Inactive",
+  "batch": "S19",
+  "one_liner": "x"
+ },
+ {
+  "id": 7,
+  "name": "No Site",
+  "slug": "no-site",
+  "website": "",
+  "all_locations": "Delhi, India",
+  "regions": [
+   "India"
+  ],
+  "team_size": 10,
+  "isHiring": true,
+  "status": "Active",
+  "batch": "S24",
+  "one_liner": "x"
+ },
+ {
+  "id": 8,
+  "name": "Mystery",
+  "slug": "mystery",
+  "website": "https://mystery.example",
+  "all_locations": "Hyderabad, India",
+  "regions": [
+   "India"
+  ],
+  "team_size": null,
+  "isHiring": true,
+  "status": "Active",
+  "batch": "S24",
+  "one_liner": "Something"
+ }
+]

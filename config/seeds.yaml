@@ -2,17 +2,24 @@
 #
 # Each entry needs:
 #   name:  display name
-#   ats:   greenhouse | lever | ashby
+#   ats:   greenhouse | lever | ashby | workable
 #   slug:  the board identifier in the ATS URL, e.g.
-#            boards.greenhouse.io/<slug>, jobs.lever.co/<slug>, jobs.ashbyhq.com/<slug>
+#            boards.greenhouse.io/<slug>, jobs.lever.co/<slug>,
+#            jobs.ashbyhq.com/<slug>, apply.workable.com/<slug>
+# Optional:
+#   team_size: headcount, if you know it (helps startup scoring and contact choice)
+#   website:   company site
+#
+# This file is your hand-picked list. `python -m applyflow discover` finds many
+# more startups automatically and keeps them in the database, not here.
 #
 # Every board below was checked live on 2026-10-11. Boards move or close, so run
 # `python -m applyflow verify-seeds` now and then; `python -m applyflow probe "Company"`
 # finds the board for a new company and can add it here for you.
 #
-# This list leans towards companies with Indian offices or remote roles. Big
-# companies mostly list experienced roles, so expect most of their postings to be
-# filtered out - that's the filters working, not a bug.
+# Big companies here mostly list experienced roles, so expect most of their
+# postings to be filtered out. Startups are where fresher roles are; add the ones
+# you like with `probe --add` or let `discover` find them.
 
 companies:
   # --- Greenhouse ---
@@ -44,3 +51,4 @@ companies:
   - {name: Supabase, ats: ashby, slug: supabase}
   - {name: Linear, ats: ashby, slug: linear}
   - {name: Cohere, ats: ashby, slug: cohere}
+  - {name: Composio, ats: ashby, slug: composio}

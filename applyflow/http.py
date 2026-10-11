@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 from urllib.parse import urlparse
+from urllib.robotparser import RobotFileParser
 
 import requests
 
@@ -42,6 +43,7 @@ class PoliteClient:
         self._sleep = sleep
         self._clock = clock
         self._last_request: dict[str, float] = {}
+        self._robots: dict[str, RobotFileParser] = {}
 
     def _wait_for_host(self, host: str) -> None:
         last = self._last_request.get(host)
@@ -51,15 +53,17 @@ class PoliteClient:
                 self._sleep(remaining)
         self._last_request[host] = self._clock()
 
-    def get_json(self, url: str, params: dict[str, Any] | None = None) -> Any:
+    def _get(self, url: str, params: dict[str, Any] | None, headers: dict[str, str] | None = None,
+             max_retries: int | None = None) -> Any:
         host = urlparse(url).netloc
+        retries = self.max_retries if max_retries is None else max_retries
         attempt = 0
         while True:
             self._wait_for_host(host)
             try:
-                response = self.session.get(url, params=params, timeout=self.timeout)
+                response = self.session.get(url, params=params, timeout=self.timeout, headers=headers)
             except requests.RequestException as exc:
-                if attempt >= self.max_retries:
+                if attempt >= retries:
                     raise FetchError(url, f"request failed: {exc}") from exc
                 attempt += 1
                 self._sleep(2 ** attempt)
@@ -67,14 +71,44 @@ class PoliteClient:
 
             status = response.status_code
             if status == 200:
-                try:
-                    return response.json()
-                except ValueError as exc:
-                    raise FetchError(url, "response was not JSON", status) from exc
-            if status in (429, 500, 502, 503, 504) and attempt < self.max_retries:
+                return response
+            if status in (429, 500, 502, 503, 504) and attempt < retries:
                 attempt += 1
                 retry_after = response.headers.get("Retry-After", "")
                 delay = float(retry_after) if retry_after.isdigit() else 2 ** attempt
                 self._sleep(min(delay, 60))
                 continue
             raise FetchError(url, f"HTTP {status}", status)
+
+    def get_json(self, url: str, params: dict[str, Any] | None = None) -> Any:
+        response = self._get(url, params)
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise FetchError(url, "response was not JSON", response.status_code) from exc
+
+    # -- web pages (company websites) -----------------------------------------
+    # Job-board APIs are built for programmatic access. Company websites are not,
+    # so page fetches check robots.txt first and use a single attempt.
+
+    def allowed_by_robots(self, url: str) -> bool:
+        parts = urlparse(url)
+        origin = f"{parts.scheme}://{parts.netloc}"
+        parser = self._robots.get(origin)
+        if parser is None:
+            parser = RobotFileParser()
+            try:
+                response = self._get(f"{origin}/robots.txt", None, {"Accept": "text/plain"}, max_retries=0)
+                parser.parse(response.text.splitlines())
+            except FetchError as exc:
+                # No robots.txt (404) means everything is allowed; other failures mean we can't tell.
+                parser.parse([] if exc.status in (404, 410) else ["User-agent: *", "Disallow: /"])
+            self._robots[origin] = parser
+        return parser.can_fetch(self.session.headers.get("User-Agent", "*"), url)
+
+    def get_page(self, url: str) -> str:
+        """Fetch an HTML page, honouring robots.txt. Raises FetchError if disallowed."""
+        if not self.allowed_by_robots(url):
+            raise FetchError(url, "disallowed by robots.txt")
+        response = self._get(url, None, {"Accept": "text/html"}, max_retries=0)
+        return response.text[:2_000_000]

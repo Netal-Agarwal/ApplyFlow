@@ -209,3 +209,24 @@ tiers:
 # Boards with more open jobs than this are treated as large companies:
 # apply through their system rather than cold-email.
 large_company_job_count: 60
+
+# ---------------------------------------------------------------------------
+# Startups. Smaller teams hire freshers more readily and a cold email reaches
+# someone who decides, so startups get a bonus and a founder/CTO contact hint.
+# ---------------------------------------------------------------------------
+startup:
+  max_team_size: 300                  # at or below this headcount counts as a startup
+  score_bonus: 6                      # points added to startup openings
+  founder_contact_max_team_size: 50   # at or below this, reach out to a founder/CTO
+  small_board_job_count: 15           # when headcount is unknown, a board this small suggests a small company
+
+# ---------------------------------------------------------------------------
+# Discovery: finding new hiring companies automatically.
+# ---------------------------------------------------------------------------
+discovery:
+  recheck_days: 30                    # re-check a company's job board at most this often
+  yc:
+    statuses: ["Active"]
+    min_team_size: 2
+    max_team_size: 1000
+    regions_any: ["India", "Remote"]  # company must list one of these in its locations/regions

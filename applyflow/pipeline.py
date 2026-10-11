@@ -54,7 +54,10 @@ def collect(
             board_key = f"{company.ats}:{company.slug}"
             collector = ATS_COLLECTORS[company.ats](client)
             try:
-                record(board_key, collector.fetch(company))
+                jobs = collector.fetch(company)
+                for job in jobs:
+                    job.team_size = company.team_size
+                record(board_key, jobs)
             except (FetchError, KeyError, TypeError, ValueError) as exc:
                 fail(board_key, exc)
 
@@ -72,6 +75,19 @@ def collect(
             fail("hn:latest", exc)
 
     return summary
+
+
+def boards_to_collect(store: Store, seeds: list[Company]) -> list[Company]:
+    """Hand-picked seeds plus every supported board that discovery found, without duplicates."""
+    from applyflow.config import SUPPORTED_ATS
+
+    companies = list(seeds)
+    seen = {c.board_key for c in seeds}
+    for company in store.discovered_boards(SUPPORTED_ATS):
+        if company.board_key not in seen:
+            seen.add(company.board_key)
+            companies.append(company)
+    return companies
 
 
 def score_all(store: Store, profile: Profile) -> list[ScoreResult]:
@@ -116,7 +132,7 @@ def probe(client: PoliteClient, name: str, slugs: list[str] | None = None) -> li
                 continue
             except (KeyError, TypeError, ValueError):
                 continue
-            # Ashby returns 200 with an empty list for unknown boards; only count real boards.
-            if jobs or ats != "ashby":
+            # Ashby and Workable answer unknown boards with an empty list; only count real boards.
+            if jobs or ats not in ("ashby", "workable"):
                 found.append((company, len(jobs)))
     return found

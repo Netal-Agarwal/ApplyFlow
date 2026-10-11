@@ -8,6 +8,7 @@
     python -m applyflow explain <job>    # why a job got its score (id, or part of a title)
     python -m applyflow probe "Company"  # find a company's ATS board; --add saves it to seeds
     python -m applyflow verify-seeds     # check every seed board still works
+    python -m applyflow discover         # find hiring startups (YC directory) and their job boards
 """
 
 from __future__ import annotations
@@ -18,8 +19,9 @@ from pathlib import Path
 
 from applyflow import config
 from applyflow.http import PoliteClient
-from applyflow.pipeline import collect, probe, score_all
-from applyflow.report import write_csv, write_html
+from applyflow.discovery import discover_yc
+from applyflow.pipeline import boards_to_collect, collect, probe, score_all
+from applyflow.report import write_companies_csv, write_csv, write_html
 from applyflow.scoring import score_job
 from applyflow.store import Store
 
@@ -29,9 +31,14 @@ def _client(profile: config.Profile, min_interval: float) -> PoliteClient:
 
 
 def cmd_collect(args, profile, store) -> int:
-    companies = config.load_seeds(args.seeds)
+    seeds = config.load_seeds(args.seeds)
+    companies = boards_to_collect(store, seeds)
     sources = set(args.source)
-    print(f"Collecting from {len(companies)} seed boards" + (" + HN" if "hn" in sources or "all" in sources else ""))
+    discovered = len(companies) - len(seeds)
+    print(
+        f"Collecting from {len(seeds)} seed boards + {discovered} discovered boards"
+        + (" + HN" if "hn" in sources or "all" in sources else "")
+    )
     summary = collect(
         store,
         _client(profile, args.min_interval),
@@ -71,6 +78,27 @@ def cmd_report(args, profile, store) -> int:
     html_path = write_html(rows, out / "opportunities.html", store.stats())
     csv_path = write_csv(rows, out / "opportunities.csv")
     print(f"{len(rows)} opportunities written to:\n  {html_path}\n  {csv_path}")
+    no_board = store.companies_without_board()
+    if no_board:
+        path = write_companies_csv(no_board, out / "startups_to_email.csv")
+        print(f"{len(no_board)} hiring startups without a readable job board (Phase 2 email candidates):\n  {path}")
+    return 0
+
+
+def cmd_discover(args, profile, store) -> int:
+    client = _client(profile, args.min_interval)
+    print(f"Discovering hiring startups from the YC directory (checking up to {args.limit})...")
+    summary = discover_yc(store, client, profile, limit=args.limit)
+    print(
+        f"\n{summary.candidates} companies match your filters; checked {summary.checked} "
+        f"({summary.skipped_recent} checked recently, skipped).\n"
+        f"  boards found:      {len(summary.found)}  -> collected on your next `run`\n"
+        f"  unsupported board: {summary.unsupported}  -> listed in startups_to_email.csv\n"
+        f"  no board found:    {summary.none}"
+    )
+    remaining = summary.candidates - summary.checked - summary.skipped_recent
+    if remaining > 0:
+        print(f"{remaining} companies left to check - run `discover` again to continue.")
     return 0
 
 
@@ -91,6 +119,11 @@ def cmd_stats(args, profile, store) -> int:
         print("\nTop reasons openings were filtered out:")
         for reason, n in s["top_reject_reasons"]:
             print(f"  {n:>5}  {reason}")
+    if s["discovered"]:
+        d = s["discovered"]
+        print(f"\nDiscovered companies: {sum(d.values())} "
+              f"(board found {d.get('found', 0)}, unsupported board {d.get('unsupported', 0)}, "
+              f"none {d.get('none', 0)})")
     if s["failed_boards"]:
         print("\nBoards failing on their latest run:")
         for board, err in s["failed_boards"]:
@@ -114,6 +147,8 @@ def cmd_explain(args, profile, store) -> int:
     result = score_job(job, profile)     # fresh, so profile edits show immediately
     print(f"{job.company} - {job.title}\n{job.url}\n")
     print(f"Tier {result.tier}, score {result.score}" + (f", action: {result.action}" if result.action else ""))
+    if result.contact_hint:
+        print(f"Who to contact: {result.contact_hint}")
     for reason in result.reasons:
         print(f"  - {reason}")
     return 0
@@ -197,6 +232,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_probe)
 
     sub.add_parser("verify-seeds", help="check every seed board still responds").set_defaults(func=cmd_verify_seeds)
+
+    p = sub.add_parser("discover", help="find hiring startups and their job boards automatically")
+    p.add_argument("--limit", type=int, default=40, help="companies to check this run (default 40)")
+    p.set_defaults(func=cmd_discover)
     return parser
 
 
