@@ -59,7 +59,8 @@ class LocationTests(unittest.TestCase):
         self.assertEqual(self.loc("Remote"), "remote_unclear")
         self.assertEqual(self.loc("London, UK"), "abroad_onsite")
         self.assertEqual(self.loc(), "unknown")
-        self.assertEqual(self.loc("Toronto", remote=True), "remote_unclear")
+        self.assertEqual(self.loc("Toronto", remote=True), "remote_restricted")
+        self.assertEqual(self.loc(remote=True), "remote_unclear")
 
     def test_best_location_wins(self):
         self.assertEqual(self.loc("San Francisco", "Bengaluru"), "preferred_india")

@@ -1,0 +1,86 @@
+{
+ "jobs": [
+  {
+   "id": "h1",
+   "title": "Software Engineer, Backend",
+   "department": "Engineering",
+   "team": "Platform",
+   "employmentType": "FullTime",
+   "location": "SF, California",
+   "secondaryLocations": [],
+   "publishedAt": "2026-09-20T12:00:00.000+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Hybrid",
+   "jobUrl": "https://jobs.ashbyhq.com/hybridco/h1",
+   "applyUrl": "https://jobs.ashbyhq.com/hybridco/h1/application",
+   "descriptionPlain": "New grads welcome. Python, Postgres, AWS. We offer relocation support."
+  },
+  {
+   "id": "h2",
+   "title": "Backend Engineer - New Grad",
+   "department": "Engineering",
+   "team": "",
+   "employmentType": "FullTime",
+   "location": "Canada",
+   "secondaryLocations": [
+    {
+     "location": "Dubai"
+    },
+    {
+     "location": "London"
+    },
+    {
+     "location": "US"
+    }
+   ],
+   "publishedAt": "2026-09-20T12:00:00.000+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "jobUrl": "https://jobs.ashbyhq.com/hybridco/h2",
+   "applyUrl": "https://jobs.ashbyhq.com/hybridco/h2/application",
+   "descriptionPlain": "Python, FastAPI, AWS. 0-1 years of experience."
+  },
+  {
+   "id": "h3",
+   "title": "Backend Engineer",
+   "department": "Engineering",
+   "team": "",
+   "employmentType": "FullTime",
+   "location": "Remote - India",
+   "secondaryLocations": [],
+   "publishedAt": "2026-09-20T12:00:00.000+00:00",
+   "isListed": true,
+   "isRemote": false,
+   "jobUrl": "https://jobs.ashbyhq.com/hybridco/h3",
+   "applyUrl": "https://jobs.ashbyhq.com/hybridco/h3/application",
+   "descriptionPlain": "Python, FastAPI, AWS."
+  },
+  {
+   "id": "h4",
+   "title": "Software Engineer Intern (Winter 2027)",
+   "department": "Engineering",
+   "team": "",
+   "employmentType": "Intern",
+   "location": "Canada",
+   "secondaryLocations": [
+    {
+     "location": "Dubai"
+    },
+    {
+     "location": "London"
+    },
+    {
+     "location": "United States"
+    }
+   ],
+   "publishedAt": "2026-09-20T12:00:00.000+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Remote",
+   "jobUrl": "https://jobs.ashbyhq.com/hybridco/h4",
+   "applyUrl": "https://jobs.ashbyhq.com/hybridco/h4/application",
+   "descriptionPlain": "Python, FastAPI, AWS, distributed systems."
+  }
+ ]
+}

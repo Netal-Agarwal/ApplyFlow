@@ -165,6 +165,10 @@ def classify_location(job: Job, profile: Profile) -> str:
         texts = [job.description.split("\n", 1)[0]]
     classes = [_classify_location_string(t, profile) for t in texts if t.strip()]
     if job.remote and not any(c.startswith("remote") for c in classes):
+        # A remote flag next to only foreign places ("Canada | London | United States")
+        # means remote within those countries, not open to India.
+        if classes and all(c == "abroad_onsite" for c in classes):
+            return "remote_restricted"
         classes.append("remote_unclear")
     if not classes:
         return "unknown"
@@ -195,12 +199,33 @@ _SPONSOR_POSITIVE = re.compile(
 )
 
 
+# Roles open only to citizens / cleared people can't sponsor anyone, whatever the
+# benefits boilerplate says about relocation (Palantir's US-government roles).
+_US_ONLY = re.compile(
+    r"\bU\.?S\.?\s+(citizen(ship)?s?|persons?)\b"
+    r"|\b(United States|American)\s+citizen(ship)?s?\b"
+    r"|\bsecurity\s+clearances?\b"
+    r"|\b(eligible|eligibility)\s+(for|to\s+obtain)\s+(a\s+)?(US\s+)?(security\s+)?clearance\b"
+    r"|\b(active|top\s+secret|TS/SCI|secret)\s+clearance\b",
+    re.I,
+)
+_ITAR = re.compile(r"\bITAR\b")   # case-sensitive: "military" contains "itar"
+
+
+def sponsorship_signal(text: str) -> tuple[str, str]:
+    """Return (positive | negative | unknown, the phrase that decided it)."""
+    for pattern in (_US_ONLY, _ITAR, _SPONSOR_NEGATIVE):
+        m = pattern.search(text)
+        if m:
+            return "negative", m.group(0)
+    m = _SPONSOR_POSITIVE.search(text)
+    if m:
+        return "positive", m.group(0)
+    return "unknown", ""
+
+
 def detect_sponsorship(text: str) -> str:
-    if _SPONSOR_NEGATIVE.search(text):
-        return "negative"
-    if _SPONSOR_POSITIVE.search(text):
-        return "positive"
-    return "unknown"
+    return sponsorship_signal(text)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +318,8 @@ def score_job(job: Job, profile: Profile) -> ScoreResult:
         )
 
     location_class = classify_location(job, profile)
-    sponsorship = detect_sponsorship(job.description)
+    sponsorship, sponsor_phrase = sponsorship_signal(job.description)
+    sponsor_phrase = " ".join(sponsor_phrase.split())
     common = dict(family=family.name, track=track, experience_years=years,
                   location_class=location_class, sponsorship=sponsorship)
     if location_class == "remote_restricted":
@@ -302,7 +328,8 @@ def score_job(job: Job, profile: Profile) -> ScoreResult:
         return _reject(job, f"Indian city outside your preferred list ({job.location_text})", **common)
     if location_class == "abroad_onsite" and profile.locations.get("abroad_requires_sponsorship", True):
         if sponsorship != "positive":
-            detail = "says no sponsorship" if sponsorship == "negative" else "no sponsorship signal"
+            detail = (f"says no sponsorship ('{sponsor_phrase}')" if sponsorship == "negative"
+                      else "no sponsorship signal")
             return _reject(job, f"onsite abroad ({job.location_text}) and {detail}", **common)
 
     reasons: list[str] = [f"role family: {family.name} ({family.tier})"]
@@ -338,7 +365,7 @@ def score_job(job: Job, profile: Profile) -> ScoreResult:
     if weight != 1.0:
         reasons.append(f"{family.tier} family weight x{weight}")
     if sponsorship == "positive":
-        reasons.append("posting signals visa sponsorship / relocation support")
+        reasons.append(f"posting signals visa sponsorship / relocation support ('{sponsor_phrase}')")
 
     if score >= profile.tiers["A"]:
         tier = "A"

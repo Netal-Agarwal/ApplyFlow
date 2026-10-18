@@ -1,0 +1,45 @@
+[
+  {
+    "id": "gov-1",
+    "text": "Forward Deployed Software Engineer - US Government",
+    "categories": {"commitment": "Full-time", "department": "Engineering", "location": "Washington, D.C.", "allLocations": ["Washington, D.C."]},
+    "createdAt": 1789000000000,
+    "hostedUrl": "https://jobs.lever.co/palantir/gov-1",
+    "applyUrl": "https://jobs.lever.co/palantir/gov-1/apply",
+    "workplaceType": "onsite",
+    "descriptionPlain": "Software Engineer, New Grad welcome. Python, Java, distributed systems, APIs.",
+    "lists": [
+      {"text": "What We Require", "content": "<li>Active US Security Clearance at or above the Top Secret level</li>"},
+      {"text": "Benefits", "content": "<li>Commuter benefits</li><li>Relocation assistance</li><li>Time off for military service</li>"}
+    ],
+    "additionalPlain": ""
+  },
+  {
+    "id": "def-1",
+    "text": "Backend Software Engineer - Defense",
+    "categories": {"commitment": "Full-time", "department": "Engineering", "location": "Palo Alto, CA", "allLocations": ["Palo Alto, CA"]},
+    "createdAt": 1789000000000,
+    "hostedUrl": "https://jobs.lever.co/palantir/def-1",
+    "applyUrl": "https://jobs.lever.co/palantir/def-1/apply",
+    "workplaceType": "onsite",
+    "descriptionPlain": "New grads welcome. Python, Java, backend services, APIs. Must be a U.S. person as defined by ITAR.",
+    "lists": [
+      {"text": "Benefits", "content": "<li>Relocation assistance</li>"}
+    ],
+    "additionalPlain": ""
+  },
+  {
+    "id": "com-1",
+    "text": "Software Engineer, New Grad",
+    "categories": {"commitment": "Full-time", "department": "Engineering", "location": "London, UK", "allLocations": ["London, UK"]},
+    "createdAt": 1789000000000,
+    "hostedUrl": "https://jobs.lever.co/palantir/com-1",
+    "applyUrl": "https://jobs.lever.co/palantir/com-1/apply",
+    "workplaceType": "onsite",
+    "descriptionPlain": "Python, Java, distributed systems, APIs. We sponsor work visas for this role.",
+    "lists": [
+      {"text": "Benefits", "content": "<li>Time off for military service and medical events</li>"}
+    ],
+    "additionalPlain": ""
+  }
+]

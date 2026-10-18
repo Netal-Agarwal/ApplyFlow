@@ -42,10 +42,12 @@ class AshbyCollector:
             locations = [loc.strip() for loc in locations if loc and loc.strip()]
 
             description = raw.get("descriptionPlain") or html_to_text(raw.get("descriptionHtml"))
+            # Ashby sets isRemote on hybrid roles too ("SF, California", isRemote: true), so
+            # only workplaceType or a location string that says remote is trusted.
             workplace = (raw.get("workplaceType") or "").lower()
-            if raw.get("isRemote") is True or workplace == "remote":
+            if workplace == "remote" or any("remote" in loc.lower() for loc in locations):
                 remote: bool | None = True
-            elif workplace == "onsite":
+            elif workplace in ("onsite", "hybrid"):
                 remote = False
             else:
                 remote = None
