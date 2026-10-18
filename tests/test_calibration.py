@@ -204,5 +204,62 @@ class MidLevelTitleTests(unittest.TestCase):
             self.assertIn("title contains excluded term", r.reasons[0])
 
 
+
+class FresherTierTests(unittest.TestCase):
+    """8. Genuine India fresher roles reach tier A; unspecified-track roles top out at B."""
+
+    def setUp(self):
+        self.profile = example_profile()
+
+    def test_india_internship_reaches_a(self):
+        # Stripe Bengaluru intern: few listed skills, one "Scala" in a language list.
+        desc = ("Build backend APIs and services in Java or Scala, with JavaScript tooling. "
+                "At least 1 year of university education.")
+        r = score_job(job("Software Engineer, Intern", desc, ["Bengaluru"]), self.profile, TODAY)
+        self.assertEqual(r.tier, "A", r.reasons)
+        self.assertIn("skill gaps ignored for internship roles: scala", r.reasons)
+
+    def test_unstated_experience_expected_for_freshers(self):
+        r = score_job(job("Software Engineer (CPD) - Winter Intern", "Python, Java, cloud.", ["Bangalore"]),
+                      self.profile, TODAY)
+        self.assertIn("experience: not stated, expected for internship roles -> 10/10", r.reasons)
+        unspecified = score_job(job("Software Engineer", "Python, Java, cloud.", ["Bangalore"]), self.profile, TODAY)
+        self.assertIn("experience: not stated -> 4/10 (could be secretly mid-level)", unspecified.reasons)
+
+    def test_skill_gaps_still_count_for_unspecified_track(self):
+        base = "Python, AWS, REST APIs, PostgreSQL"
+        plain = score_job(job("Backend Engineer", base), self.profile, TODAY)
+        golang = score_job(job("Backend Engineer", base + ", Golang"), self.profile, TODAY)
+        self.assertLess(golang.score, plain.score)
+
+    def test_unspecified_track_capped_at_b(self):
+        desc = "Node.js, Express, REST APIs, PostgreSQL, MongoDB, backend, AWS, Lambda, serverless, Python"
+        r = score_job(job("Nodejs developer", desc, ["Bengaluru"], team_size=38), self.profile, TODAY)
+        self.assertGreaterEqual(r.score, self.profile.tiers["A"])
+        self.assertEqual(r.tier, "B")
+        self.assertIn("capped at tier B: track 'unspecified'", r.reasons[-1])
+
+    def test_us_new_grad_with_relocation_stays_out_of_a(self):
+        desc = "New grads. Python, Java, distributed systems, APIs. Relocation assistance."
+        r = score_job(job("Software Engineer, New Grad", desc, ["Chicago, IL"]), self.profile, TODAY)
+        self.assertEqual(r.location_class, "abroad_onsite")
+        self.assertNotEqual(r.tier, "A")
+
+    def test_report_lists_tier_a_first(self):
+        store = Store(":memory:")
+        try:
+            desc = "Node.js, Express, REST APIs, PostgreSQL, MongoDB, backend, AWS, Lambda, serverless, Python"
+            store.upsert_board("greenhouse:acme", [
+                job("Nodejs developer", desc, ["Bengaluru"], external_id="1"),             # capped B, higher score
+                job("Backend Engineer Intern", "Python, AWS, SQL, Docker", ["Bengaluru"], external_id="2"),
+            ])
+            score_all(store, self.profile, TODAY)
+            rows = store.ranked()
+            self.assertEqual([r["tier"] for r in rows], ["A", "B"])
+            self.assertGreater(rows[1]["score"], rows[0]["score"])
+        finally:
+            store.close()
+
+
 if __name__ == "__main__":
     unittest.main()

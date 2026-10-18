@@ -235,7 +235,7 @@ class Store:
                    s.merged_locations
             FROM scores s JOIN jobs j ON j.id = s.job_id
             WHERE j.active = 1 AND s.tier IN ({placeholders})
-            ORDER BY s.score DESC, j.company, j.title
+            ORDER BY s.tier, s.score DESC, j.company, j.title          -- "A" < "B"
             """,
             tiers,
         ).fetchall()

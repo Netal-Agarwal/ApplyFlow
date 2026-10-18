@@ -179,8 +179,9 @@ class StartupScoringTests(unittest.TestCase):
         return Job(**base)
 
     def test_startup_bonus(self):
-        small = score_job(self.job(team_size=20), self.profile)
-        big = score_job(self.job(team_size=5000), self.profile)
+        desc = "New grad. Python, AWS"      # few skills, so neither score hits the 100 cap
+        small = score_job(self.job(team_size=20, description=desc), self.profile)
+        big = score_job(self.job(team_size=5000, description=desc), self.profile)
         self.assertEqual(small.score - big.score, self.profile.startup["score_bonus"])
         self.assertTrue(any("startup (20 people)" in r for r in small.reasons))
 

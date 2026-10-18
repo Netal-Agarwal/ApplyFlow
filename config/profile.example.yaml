@@ -201,7 +201,7 @@ skills:
     - .net
     - ruby on rails
     - elixir
-  skill_score_cap: 30   # raw points that count as a "perfect" skill match
+  skill_score_cap: 22   # raw points that count as a "perfect" skill match (real JDs name few skills)
 
 # ---------------------------------------------------------------------------
 # Scoring thresholds (0-100).
@@ -209,6 +209,9 @@ skills:
 tiers:
   A: 70
   B: 45
+# Only these tracks can reach tier A; an unspecified-track role tops out at B,
+# since it may be secretly mid-level.
+a_tier_tracks: ["internship", "new_grad"]
 
 # ---------------------------------------------------------------------------
 # Freshness, from the date the board (re)published the posting.

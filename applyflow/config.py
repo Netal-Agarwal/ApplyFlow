@@ -72,6 +72,7 @@ class Profile:
     large_company_job_count: int
     startup: dict[str, Any] = field(default_factory=dict)
     freshness: dict[str, Any] = field(default_factory=dict)
+    a_tier_tracks: list[str] = field(default_factory=lambda: ["internship", "new_grad"])
     discovery: dict[str, Any] = field(default_factory=dict)
     source_path: Path = field(default=PROFILE_PATH)
 
@@ -125,11 +126,12 @@ def parse_profile(data: dict[str, Any], source_path: Path = PROFILE_PATH) -> Pro
         max_years_required=int(data.get("max_years_required", 1)),
         locations=_require(data, "locations"),
         skills=skills,
-        skill_score_cap=int(raw_skills.get("skill_score_cap", 30)),
+        skill_score_cap=int(raw_skills.get("skill_score_cap", 22)),
         tiers=tiers,
         large_company_job_count=int(data.get("large_company_job_count", 60)),
         startup={**DEFAULT_STARTUP, **(data.get("startup") or {})},
         freshness={**DEFAULT_FRESHNESS, **(data.get("freshness") or {})},
+        a_tier_tracks=list(data.get("a_tier_tracks") or ["internship", "new_grad"]),
         discovery={**DEFAULT_DISCOVERY, **(data.get("discovery") or {})},
         source_path=source_path,
     )

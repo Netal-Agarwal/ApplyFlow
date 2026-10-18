@@ -163,7 +163,7 @@ class ProfileKnobTests(unittest.TestCase):
 
     def test_negative_skills_pull_score_down(self):
         profile = example_profile()
-        base = "New grad. Python, AWS, REST APIs, PostgreSQL"
+        base = "Python, AWS, REST APIs, PostgreSQL"     # unspecified track: gaps count
         plain = score_job(job("Backend Engineer", base), profile)
         golang = score_job(job("Backend Engineer", base + ", Golang, Spring Boot, Kotlin"), profile)
         self.assertLess(golang.score, plain.score)

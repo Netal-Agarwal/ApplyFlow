@@ -246,13 +246,13 @@ def detect_sponsorship(text: str) -> str:
 # Skills
 # ---------------------------------------------------------------------------
 
-def skill_match(job: Job, profile: Profile) -> tuple[float, list[str], list[str]]:
+def skill_match(job: Job, profile: Profile, ignore_negatives: bool = False) -> tuple[float, list[str], list[str]]:
     """Return (fraction 0-1, matched positive skills, matched negative skills)."""
     text = f"{job.title}\n{job.description}"
     matched = matching_phrases(text, list(profile.skills))
     positives = [s for s in matched if profile.skills[s] > 0]
     negatives = [s for s in matched if profile.skills[s] < 0]
-    raw = sum(profile.skills[s] for s in matched)
+    raw = sum(profile.skills[s] for s in (positives if ignore_negatives else matched))
     fraction = max(0.0, min(1.0, raw / max(profile.skill_score_cap, 1)))
     return fraction, positives, negatives
 
@@ -393,10 +393,14 @@ def score_job(job: Job, profile: Profile, today: date | None = None) -> ScoreRes
 
     reasons: list[str] = [f"role family: {family.name} ({family.tier})"]
 
-    fraction, positives, negatives = skill_match(job, profile)
+    # Internships and new-grad roles train you; a stack listed in their JD isn't a gap.
+    fresher = track in ("internship", "new_grad")
+    fraction, positives, negatives = skill_match(job, profile, ignore_negatives=fresher)
     skill_points = 50 * fraction
     reasons.append(f"skills: {round(skill_points)}/50 from {', '.join(positives[:12]) or 'none'}")
-    if negatives:
+    if negatives and fresher:
+        reasons.append(f"skill gaps ignored for {track} roles: {', '.join(negatives)}")
+    elif negatives:
         reasons.append(f"skill gaps pulling it down: {', '.join(negatives)}")
 
     location_points = LOCATION_POINTS[location_class]
@@ -405,7 +409,10 @@ def score_job(job: Job, profile: Profile, today: date | None = None) -> ScoreRes
     track_points = 20 if track in ("internship", "new_grad") else 8
     reasons.append(f"track: {track} -> {track_points}/20")
 
-    if years is None:
+    if years is None and fresher:
+        experience_points = 10
+        reasons.append(f"experience: not stated, expected for {track} roles -> 10/10")
+    elif years is None:
         experience_points = 4
         reasons.append("experience: not stated -> 4/10 (could be secretly mid-level)")
     else:
@@ -432,8 +439,12 @@ def score_job(job: Job, profile: Profile, today: date | None = None) -> ScoreRes
     if sponsorship == "positive":
         reasons.append(f"posting signals visa sponsorship / relocation support ('{sponsor_phrase}')")
 
-    if score >= profile.tiers["A"]:
+    if score >= profile.tiers["A"] and track in profile.a_tier_tracks:
         tier = "A"
+    elif score >= profile.tiers["A"]:
+        tier = "B"
+        reasons.append(f"capped at tier B: track '{track}' could be secretly mid-level "
+                       f"(tier A is for {', '.join(profile.a_tier_tracks)})")
     elif score >= profile.tiers["B"]:
         tier = "B"
     else:
