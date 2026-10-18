@@ -36,7 +36,7 @@ def _row_dict(row: Row) -> dict[str, str]:
         "title": row["title"],
         "track": row["track"],
         "family": row["family"],
-        "location": " | ".join(json.loads(row["locations"] or "[]")),
+        "location": " | ".join(json.loads(row["merged_locations"] or row["locations"] or "[]")),
         "location_class": row["location_class"],
         "action": row["action"],
         "contact_hint": row["contact_hint"] or "",

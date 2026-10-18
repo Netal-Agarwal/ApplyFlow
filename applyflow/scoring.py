@@ -308,6 +308,40 @@ def decide_action(job: Job, location_class: str, profile: Profile) -> str:
     return "apply_plus_email"
 
 
+def normalized_title(job: Job) -> str:
+    """Title with the posting's own city words removed: 'Backend Engineer - Pune' -> 'backend engineer'."""
+    title = job.title.lower()
+    for loc in job.locations:
+        city = loc.split(",")[0].strip().lower()
+        if city:
+            title = re.sub(rf"(?<![a-z0-9]){re.escape(city)}(?![a-z0-9])", " ", title)
+    return " ".join(re.findall(r"[a-z0-9+#]+", title))
+
+
+def merge_duplicates(jobs: list[Job], results: list[ScoreResult]) -> None:
+    """One row per (company, title): the best-scoring posting keeps every location.
+
+    Big companies post the same role once per city. The others are marked rejected
+    with a reason pointing at the posting that was kept.
+    """
+    groups: dict[tuple[str, str], list[tuple[Job, ScoreResult]]] = {}
+    for job, result in zip(jobs, results):
+        if result.tier != "rejected":
+            groups.setdefault((job.company.lower(), normalized_title(job)), []).append((job, result))
+    for pairs in groups.values():
+        if len(pairs) < 2:
+            continue
+        pairs.sort(key=lambda p: (-p[1].score, LOCATION_RANK.index(p[1].location_class or "unknown"), p[0].id))
+        best_job, best = pairs[0]
+        for job, result in pairs[1:]:
+            for loc in job.locations:
+                if loc not in best.merged_locations:
+                    best.merged_locations.append(loc)
+            result.accepted, result.tier = False, "rejected"
+            result.reasons.insert(0, f"duplicate posting (same company + title; kept {best_job.id})")
+        best.reasons.append(f"merged {len(pairs) - 1} duplicate posting(s) for other locations")
+
+
 def score_job(job: Job, profile: Profile, today: date | None = None) -> ScoreResult:
     excluded = title_exclusion(job, profile)
     if excluded:
@@ -407,6 +441,7 @@ def score_job(job: Job, profile: Profile, today: date | None = None) -> ScoreRes
 
     return ScoreResult(
         job_id=job.id,
+        merged_locations=list(job.locations),
         accepted=tier in ("A", "B"),
         score=score,
         tier=tier,

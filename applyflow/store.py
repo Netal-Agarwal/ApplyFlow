@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS scores (
     lead_project     TEXT,
     matched_skills   TEXT,                      -- JSON list
     reasons          TEXT,                      -- JSON list
+    merged_locations TEXT,                      -- JSON list: own + merged duplicates' locations
     scored_at        TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_scores_tier ON scores(tier);
@@ -105,7 +106,8 @@ class Store:
 
     def _migrate(self) -> None:
         """Add columns introduced after a database was first created."""
-        for table, column, decl in (("jobs", "team_size", "INTEGER"), ("scores", "contact_hint", "TEXT")):
+        for table, column, decl in (("jobs", "team_size", "INTEGER"), ("scores", "contact_hint", "TEXT"),
+                                     ("scores", "merged_locations", "TEXT")):
             cols = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
@@ -213,13 +215,14 @@ class Store:
                     """
                     INSERT INTO scores (job_id, accepted, score, tier, family, track, location_class,
                                         experience_years, sponsorship, action, contact_hint, lead_project,
-                                        matched_skills, reasons, scored_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        matched_skills, reasons, merged_locations, scored_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         r.job_id, int(r.accepted), r.score, r.tier, r.family, r.track, r.location_class,
                         r.experience_years, r.sponsorship, r.action, r.contact_hint, r.lead_project,
-                        json.dumps(r.matched_skills), json.dumps(r.reasons), now,
+                        json.dumps(r.matched_skills), json.dumps(r.reasons),
+                        json.dumps(r.merged_locations), now,
                     ),
                 )
 
@@ -228,7 +231,8 @@ class Store:
         return self.conn.execute(
             f"""
             SELECT j.*, s.score, s.tier, s.family, s.track, s.location_class, s.experience_years,
-                   s.sponsorship, s.action, s.contact_hint, s.lead_project, s.matched_skills, s.reasons
+                   s.sponsorship, s.action, s.contact_hint, s.lead_project, s.matched_skills, s.reasons,
+                   s.merged_locations
             FROM scores s JOIN jobs j ON j.id = s.job_id
             WHERE j.active = 1 AND s.tier IN ({placeholders})
             ORDER BY s.score DESC, j.company, j.title

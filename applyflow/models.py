@@ -81,3 +81,4 @@ class ScoreResult:
     lead_project: str = ""
     matched_skills: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
+    merged_locations: list[str] = field(default_factory=list)   # this posting's + its merged duplicates'

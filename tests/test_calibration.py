@@ -1,10 +1,16 @@
 """Regression tests for the calibration backlog found on the first live run (CLAUDE.md)."""
 
+import csv
+import tempfile
 import unittest
+from pathlib import Path
 
 from applyflow.collectors import AshbyCollector, LeverCollector
 from applyflow.models import Company, Job
-from applyflow.scoring import score_job, sponsorship_signal
+from applyflow.pipeline import score_all
+from applyflow.report import write_csv
+from applyflow.scoring import normalized_title, score_job, sponsorship_signal
+from applyflow.store import Store
 from tests.helpers import TODAY, example_profile, fixture
 
 
@@ -105,6 +111,44 @@ class FreshnessTests(unittest.TestCase):
     def test_profile_can_tune_thresholds(self):
         self.profile.freshness["max_age_days"] = 5000
         self.assertNotEqual(score_job(job(posted_at="2014-01-23"), self.profile, TODAY).tier, "rejected")
+
+
+
+class DuplicateTests(unittest.TestCase):
+    """4. One opening posted once per city becomes one row with every location."""
+
+    def setUp(self):
+        self.store = Store(":memory:")
+        desc = "0-1 years experience. Python, FastAPI, AWS, REST APIs, PostgreSQL."
+        self.store.upsert_board("greenhouse:acme", [
+            job("Backend Engineer - New Grad", desc, ["Hyderabad"], external_id="1"),
+            job("Backend Engineer - New Grad", desc, ["Bengaluru"], external_id="2"),
+            job("Backend Engineer - New Grad (Pune)", desc, ["Pune"], external_id="3"),
+            job("Backend Engineer Intern", desc, ["Bengaluru"], external_id="4"),
+        ])
+
+    def tearDown(self):
+        self.store.close()
+
+    def test_normalized_title_drops_own_city(self):
+        self.assertEqual(normalized_title(job("Backend Engineer - New Grad (Pune)", locations=["Pune, India"])),
+                         "backend engineer new grad")
+
+    def test_merged_into_best_posting(self):
+        results = {r.job_id: r for r in score_all(self.store, example_profile(), TODAY)}
+        kept = [r for r in results.values() if r.accepted]
+        self.assertEqual(sorted(r.job_id for r in kept), ["greenhouse:1", "greenhouse:4"])
+        self.assertEqual(results["greenhouse:1"].merged_locations, ["Hyderabad", "Bengaluru", "Pune"])
+        self.assertIn("merged 2 duplicate posting(s) for other locations", results["greenhouse:1"].reasons)
+        self.assertEqual(results["greenhouse:3"].reasons[0],
+                         "duplicate posting (same company + title; kept greenhouse:1)")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_csv(self.store.ranked(), Path(tmp) / "o.csv")
+            with open(path, encoding="utf-8") as fh:
+                rows = {r["id"]: r for r in csv.DictReader(fh)}
+        self.assertEqual(rows["greenhouse:1"]["location"], "Hyderabad | Bengaluru | Pune")
+        self.assertEqual(self.store.stats()["top_reject_reasons"], [("duplicate posting", 2)])
 
 
 if __name__ == "__main__":

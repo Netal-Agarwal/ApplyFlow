@@ -11,7 +11,7 @@ from applyflow.collectors import ATS_COLLECTORS, HNWhoIsHiringCollector
 from applyflow.config import Profile
 from applyflow.http import FetchError, PoliteClient
 from applyflow.models import Company, ScoreResult
-from applyflow.scoring import score_job
+from applyflow.scoring import merge_duplicates, score_job
 from applyflow.store import Store
 
 Log = Callable[[str], None]
@@ -92,7 +92,9 @@ def boards_to_collect(store: Store, seeds: list[Company]) -> list[Company]:
 
 
 def score_all(store: Store, profile: Profile, today: date | None = None) -> list[ScoreResult]:
-    results = [score_job(job, profile, today) for job in store.active_jobs()]
+    jobs = store.active_jobs()
+    results = [score_job(job, profile, today) for job in jobs]
+    merge_duplicates(jobs, results)
     store.save_scores(results)
     return results
 
