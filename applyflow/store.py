@@ -73,7 +73,9 @@ CREATE TABLE IF NOT EXISTS companies (
     batch         TEXT,
     ats           TEXT,                        -- supported ATS, unsupported one (e.g. keka), or ''
     slug          TEXT,
-    board_status  TEXT NOT NULL,               -- found | unsupported | none | error
+    board_status  TEXT NOT NULL,               -- found | unverified | unsupported | none | error
+    detected_from TEXT,                        -- website | slug_guess
+    status_reason TEXT,                        -- why the board was (not) verified
     checked_at    TEXT NOT NULL,
     added_at      TEXT NOT NULL
 );
@@ -107,7 +109,8 @@ class Store:
     def _migrate(self) -> None:
         """Add columns introduced after a database was first created."""
         for table, column, decl in (("jobs", "team_size", "INTEGER"), ("scores", "contact_hint", "TEXT"),
-                                     ("scores", "merged_locations", "TEXT")):
+                                     ("scores", "merged_locations", "TEXT"), ("companies", "detected_from", "TEXT"),
+                                     ("companies", "status_reason", "TEXT")):
             cols = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
@@ -251,16 +254,17 @@ class Store:
             self.conn.execute(
                 """
                 INSERT INTO companies (key, name, website, source, team_size, description, locations, batch,
-                                       ats, slug, board_status, checked_at, added_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                       ats, slug, board_status, detected_from, status_reason, checked_at, added_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET
                     name=excluded.name, website=excluded.website, team_size=excluded.team_size,
                     description=excluded.description, locations=excluded.locations, batch=excluded.batch,
                     ats=excluded.ats, slug=excluded.slug, board_status=excluded.board_status,
+                    detected_from=excluded.detected_from, status_reason=excluded.status_reason,
                     checked_at=excluded.checked_at
                 """,
                 (c.key, c.name, c.website, c.source, c.team_size, c.description, c.locations, c.batch,
-                 c.ats, c.slug, c.board_status, now, now),
+                 c.ats, c.slug, c.board_status, c.detected_from, c.status_reason, now, now),
             )
 
     def recently_checked(self, key: str, days: int) -> bool:
@@ -279,10 +283,34 @@ class Store:
         return [Company(name=r["name"], ats=r["ats"], slug=r["slug"], team_size=r["team_size"],
                         website=r["website"] or "", source=r["source"]) for r in rows]
 
+    def companies_with_board(self, statuses: tuple[str, ...] = ("found",)) -> list[DiscoveredCompany]:
+        """Discovered companies with a supported board in one of these statuses."""
+        placeholders = ",".join("?" for _ in statuses)
+        rows = self.conn.execute(f"SELECT * FROM companies WHERE board_status IN ({placeholders}) AND slug != '' "
+                                 "ORDER BY name", statuses).fetchall()
+        return [DiscoveredCompany(
+            key=r["key"], name=r["name"], website=r["website"] or "", source=r["source"], team_size=r["team_size"],
+            description=r["description"] or "", locations=r["locations"] or "", batch=r["batch"] or "",
+            ats=r["ats"] or "", slug=r["slug"] or "", board_status=r["board_status"],
+            detected_from=r["detected_from"] or "", status_reason=r["status_reason"] or "") for r in rows]
+
+    def set_board_status(self, c: DiscoveredCompany) -> None:
+        """Record a re-check of a saved board without touching checked_at (discovery's own clock)."""
+        with self.conn:
+            self.conn.execute(
+                "UPDATE companies SET board_status = ?, detected_from = ?, status_reason = ? WHERE key = ?",
+                (c.board_status, c.detected_from, c.status_reason, c.key))
+
+    def deactivate_board(self, board_key: str) -> int:
+        """Stop showing a board's jobs (e.g. it turned out to be another company's board)."""
+        with self.conn:
+            return self.conn.execute(
+                "UPDATE jobs SET active = 0 WHERE board_key = ? AND active = 1", (board_key,)).rowcount
+
     def companies_without_board(self) -> list[sqlite3.Row]:
         """Hiring companies whose board we can't read: candidates for direct outreach in Phase 2."""
         return self.conn.execute(
-            "SELECT * FROM companies WHERE board_status IN ('unsupported', 'none') "
+            "SELECT * FROM companies WHERE board_status IN ('unsupported', 'unverified', 'none') "
             "ORDER BY CASE WHEN lower(locations) LIKE '%india%' THEN 0 ELSE 1 END, "
             "COALESCE(team_size, 100000), name"
         ).fetchall()

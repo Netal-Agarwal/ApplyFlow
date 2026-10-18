@@ -51,7 +51,15 @@ def _row_dict(row: Row) -> dict[str, str]:
     }
 
 
-COMPANY_FIELDS = ["name", "website", "team_size", "locations", "board", "description", "batch", "source"]
+COMPANY_FIELDS = ["name", "website", "team_size", "locations", "board", "reason", "description", "batch", "source"]
+
+
+def _board_label(r: Row) -> str:
+    if r["board_status"] == "unsupported":
+        return r["ats"]
+    if r["board_status"] == "unverified":
+        return f"unverified ({r['ats']}:{r['slug']})"
+    return "none found"
 
 
 def write_companies_csv(rows: list[Row], path: Path) -> Path:
@@ -65,7 +73,7 @@ def write_companies_csv(rows: list[Row], path: Path) -> Path:
                 "name": r["name"], "website": r["website"] or "",
                 "team_size": "" if r["team_size"] is None else r["team_size"],
                 "locations": r["locations"] or "",
-                "board": r["ats"] if r["board_status"] == "unsupported" else "none found",
+                "board": _board_label(r), "reason": r["status_reason"] or "",
                 "description": r["description"] or "", "batch": r["batch"] or "", "source": r["source"],
             })
     return path

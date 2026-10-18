@@ -117,6 +117,7 @@ title_exclude:
   - test engineer
   - sdet
   - solutions engineer
+  - solution engineer
   - sales engineer
   - support engineer
   # security roles aren't a target
@@ -259,4 +260,5 @@ discovery:
     statuses: ["Active"]
     min_team_size: 2
     max_team_size: 1000
-    regions_any: ["India", "Remote"]  # company must list one of these in its locations/regions
+    regions_any: ["India"]            # company must be located in one of these ("Remote" alone means US-remote)
+    preferred_team_size: [10, 300]    # teams in this range are checked before smaller or larger ones

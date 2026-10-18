@@ -129,8 +129,8 @@ class YCDiscoveryTests(unittest.TestCase):
 
     def test_filters_and_order(self):
         names = [c.name for c in yc_candidates(self.data, self.profile)]
-        # India first (smallest team first, unknown size last), then remote companies.
-        self.assertEqual(names, ["Tiny Labs", "Keka Co", "Mystery", "Remote Rocket"])
+        # India-located only (round 3: "Remote" alone no longer qualifies); 10-300 people first, unknown last.
+        self.assertEqual(names, ["Tiny Labs", "Keka Co", "Mystery"])
 
     def test_slug_guesses(self):
         self.assertEqual(slug_guesses("Tiny Labs", "https://www.tinylabs.example"), ["tinylabs", "tiny-labs"])
@@ -146,9 +146,9 @@ class YCDiscoveryTests(unittest.TestCase):
         store = Store(":memory:")
         logs = []
         summary = discover_yc(store, client, self.profile, limit=10, log=logs.append, data=self.data)
-        self.assertEqual(summary.candidates, 4)
+        self.assertEqual(summary.candidates, 3)
         self.assertEqual([c.name for c in summary.found], ["Tiny Labs"])
-        self.assertEqual((summary.unsupported, summary.none), (1, 2))
+        self.assertEqual((summary.unsupported, summary.none), (1, 1))
 
         boards = store.discovered_boards(("greenhouse", "lever", "ashby", "workable"))
         self.assertEqual([(b.ats, b.slug, b.team_size) for b in boards], [("workable", "tinylabs", 12)])
@@ -157,7 +157,7 @@ class YCDiscoveryTests(unittest.TestCase):
 
         # A second run skips everything checked recently.
         again = discover_yc(store, client, self.profile, limit=10, log=lambda _: None, data=self.data)
-        self.assertEqual((again.checked, again.skipped_recent), (0, 4))
+        self.assertEqual((again.checked, again.skipped_recent), (0, 3))
         store.close()
 
     def test_limit(self):

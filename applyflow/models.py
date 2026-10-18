@@ -33,7 +33,9 @@ class DiscoveredCompany:
     batch: str = ""
     ats: str = ""                   # supported ATS, an unsupported one (e.g. "keka"), or "" if none found
     slug: str = ""
-    board_status: str = "unchecked" # found | unsupported | none | error | unchecked
+    board_status: str = "unchecked" # found | unverified | unsupported | none | error | unchecked
+    detected_from: str = ""         # website (linked from the company's site) | slug_guess
+    status_reason: str = ""         # why the board was verified, or why it wasn't
 
 
 @dataclass

@@ -1,0 +1,21 @@
+{
+ "apiVersion": "1",
+ "jobs": [
+  {
+   "id": "as1",
+   "title": "Senior Scientist, Biologics Cell Line Development",
+   "department": "Cell Line Development",
+   "team": "Biologics",
+   "employmentType": "FullTime",
+   "location": "Boston, MA",
+   "secondaryLocations": [],
+   "publishedAt": "2026-09-20T12:00:00.000+00:00",
+   "isListed": true,
+   "isRemote": false,
+   "workplaceType": "OnSite",
+   "jobUrl": "https://jobs.ashbyhq.com/asimov/as1",
+   "applyUrl": "https://jobs.ashbyhq.com/asimov/as1/application",
+   "descriptionPlain": "Asimov is building a synthetic biology platform. Lead CHO cell line development for biologics programs."
+  }
+ ]
+}

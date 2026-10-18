@@ -60,6 +60,7 @@ companies, about 3-5 minutes), and `run` daily (a minute or two).
 | `python -m applyflow probe "Company Name" [--add]` | Find which ATS a company's board is on; `--add` saves it to the seed list |
 | `python -m applyflow verify-seeds` | Check every seed board still responds |
 | `python -m applyflow discover [--limit 40]` | Find hiring startups in the YC directory and detect their job boards |
+| `python -m applyflow verify-boards` | Check every discovered board belongs to its company; demote mismatches |
 
 ## How it works
 
@@ -76,19 +77,27 @@ HN "Who is hiring" ────────────────────�
 | Source | Why | How |
 |---|---|---|
 | Greenhouse, Lever, Ashby, Workable | Most startups host their job board on one of these; each exposes a free public JSON API | One request per board (seeds + discovered) |
-| YC company directory | Thousands of startups with headcount, location and a "hiring" flag | [yc-oss export](https://yc-oss.github.io/api/) of YC's public directory; filtered to active, hiring, India/remote |
+| YC company directory | Thousands of startups with headcount, location and a "hiring" flag | [yc-oss export](https://yc-oss.github.io/api/) of YC's public directory; filtered to active, hiring, located in India |
 | Hacker News "Who is hiring?" | Monthly thread; strong for remote-global roles, and many posts invite applicants to email directly | Free HN Algolia API; top-level comments only |
 
 ### Startup discovery
 
-`discover` takes hiring YC companies that match your filters (Indian and smallest
-teams first), then for each one:
+`discover` takes hiring YC companies located in India (`discovery.yc.regions_any`; "Remote"
+alone doesn't count, since US startups use it for US-remote), teams of 10-300 people first
+(`preferred_team_size`), then for each one:
 
 1. Reads its homepage and careers page (respecting `robots.txt`) looking for links to a
    job board. Greenhouse, Lever, Ashby and Workable boards get collected from then on.
-2. If none is linked, tries a few slugs from its domain and name on each supported board.
+2. If none is linked, tries a few slugs from its domain and name on each supported board -
+   but slugs like "bloom" are shared by many companies, so a guessed board is only trusted
+   when it points back to the company (the website it links to, or its name). Otherwise it's
+   saved as **unverified** with the reason, and not collected.
 3. If it uses a board without a public API (Keka, Darwinbox, Zoho Recruit, Freshteam,
-   Wellfound, ...) or none at all, it's saved to `startups_to_email.csv` for direct outreach.
+   Wellfound, ...), an unverified board, or none at all, it's saved to `startups_to_email.csv`
+   for direct outreach.
+
+`verify-boards` re-runs that check on every saved board: mismatches are demoted (their jobs
+leave the report) and unverified boards that now pass are promoted.
 
 Results are stored, so each company is re-checked at most every 30 days.
 

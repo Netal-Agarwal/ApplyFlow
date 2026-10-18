@@ -40,7 +40,8 @@ DEFAULT_DISCOVERY = {
         "statuses": ["Active"],
         "min_team_size": 2,
         "max_team_size": 1000,
-        "regions_any": ["India", "Remote"],
+        "regions_any": ["India"],          # "Remote" alone would admit US-only startups
+        "preferred_team_size": [10, 300],  # checked first: big enough for interns, small enough to email
     },
 }
 

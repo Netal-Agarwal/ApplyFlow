@@ -8,6 +8,7 @@
     python -m applyflow explain <job>    # why a job got its score (id, or part of a title)
     python -m applyflow probe "Company"  # find a company's ATS board; --add saves it to seeds
     python -m applyflow verify-seeds     # check every seed board still works
+    python -m applyflow verify-boards    # check discovered boards belong to their company
     python -m applyflow discover         # find hiring startups (YC directory) and their job boards
 """
 
@@ -19,7 +20,7 @@ from pathlib import Path
 
 from applyflow import config
 from applyflow.http import PoliteClient
-from applyflow.discovery import discover_yc
+from applyflow.discovery import discover_yc, verify_saved_boards
 from applyflow.pipeline import boards_to_collect, collect, probe, score_all
 from applyflow.report import write_companies_csv, write_csv, write_html
 from applyflow.scoring import score_job
@@ -93,12 +94,24 @@ def cmd_discover(args, profile, store) -> int:
         f"\n{summary.candidates} companies match your filters; checked {summary.checked} "
         f"({summary.skipped_recent} checked recently, skipped).\n"
         f"  boards found:      {len(summary.found)}  -> collected on your next `run`\n"
+        f"  unverified board:  {len(summary.unverified)}  -> guessed board may be another company's; "
+        f"listed in startups_to_email.csv\n"
         f"  unsupported board: {summary.unsupported}  -> listed in startups_to_email.csv\n"
         f"  no board found:    {summary.none}"
     )
     remaining = summary.candidates - summary.checked - summary.skipped_recent
     if remaining > 0:
         print(f"{remaining} companies left to check - run `discover` again to continue.")
+    return 0
+
+
+def cmd_verify_boards(args, profile, store) -> int:
+    print("Re-checking that every discovered board belongs to its company...")
+    demoted, promoted = verify_saved_boards(store, _client(profile, args.min_interval))
+    print(f"\n{len(demoted)} board(s) demoted to unverified; their jobs no longer appear in the report "
+          "(re-run `report` or `run` to refresh it).")
+    if promoted:
+        print(f"{len(promoted)} unverified board(s) now pass and will be collected on the next `run`.")
     return 0
 
 
@@ -122,8 +135,8 @@ def cmd_stats(args, profile, store) -> int:
     if s["discovered"]:
         d = s["discovered"]
         print(f"\nDiscovered companies: {sum(d.values())} "
-              f"(board found {d.get('found', 0)}, unsupported board {d.get('unsupported', 0)}, "
-              f"none {d.get('none', 0)})")
+              f"(board found {d.get('found', 0)}, unverified board {d.get('unverified', 0)}, "
+              f"unsupported board {d.get('unsupported', 0)}, none {d.get('none', 0)})")
     if s["failed_boards"]:
         print("\nBoards failing on their latest run:")
         for board, err in s["failed_boards"]:
@@ -232,6 +245,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_probe)
 
     sub.add_parser("verify-seeds", help="check every seed board still responds").set_defaults(func=cmd_verify_seeds)
+    sub.add_parser("verify-boards", help="check discovered boards belong to their company; demote mismatches"
+                   ).set_defaults(func=cmd_verify_boards)
 
     p = sub.add_parser("discover", help="find hiring startups and their job boards automatically")
     p.add_argument("--limit", type=int, default=40, help="companies to check this run (default 40)")
