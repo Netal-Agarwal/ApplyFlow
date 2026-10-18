@@ -42,7 +42,7 @@ class GreenhouseCollector:
                 Job(
                     source="greenhouse",
                     external_id=str(raw["id"]),
-                    company=raw.get("company_name") or company.name,
+                    company=company.name or raw.get("company_name") or "",   # "Rubrik Job Board" is a board title
                     title=(raw.get("title") or "").strip(),
                     url=raw.get("absolute_url") or "",
                     apply_url=raw.get("absolute_url") or "",

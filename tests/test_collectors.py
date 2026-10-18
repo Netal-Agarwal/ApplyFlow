@@ -12,7 +12,7 @@ class GreenhouseTests(unittest.TestCase):
         self.assertEqual(len(jobs), 8)
         intern = jobs[0]
         self.assertEqual(intern.id, "greenhouse:1001")
-        self.assertEqual(intern.company, "Acme India")
+        self.assertEqual(intern.company, "Acme")          # seed name beats company_name
         self.assertEqual(intern.locations, ["Bengaluru"])
         self.assertIn("FastAPI", intern.description)
         self.assertNotIn("&lt;", intern.description)

@@ -179,5 +179,18 @@ class BoilerplateEmailTests(unittest.TestCase):
 
 
 
+class CompanyNameTests(unittest.TestCase):
+    """6. The seed / discovered name wins over Greenhouse's board title ("Rubrik Job Board")."""
+
+    def test_greenhouse(self):
+        jobs = GreenhouseCollector.parse(fixture("greenhouse_rubrik.json"), Company("Rubrik", "greenhouse", "rubrik"))
+        self.assertEqual({j.company for j in jobs}, {"Rubrik"})
+
+    def test_ats_name_used_when_company_has_none(self):
+        jobs = GreenhouseCollector.parse(fixture("greenhouse_rubrik.json"), Company("", "greenhouse", "rubrik"))
+        self.assertEqual(jobs[0].company, "Rubrik Job Board")
+
+
+
 if __name__ == "__main__":
     unittest.main()
