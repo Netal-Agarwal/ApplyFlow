@@ -100,7 +100,8 @@ forbid it and they actively block scrapers.
 Each opening goes through these checks in order. Anything rejected records why, so
 `explain` and `stats` can show it.
 
-1. **Title filters** - excluded terms (senior, lead, SDE-2, frontend, android, ...) reject the role.
+1. **Title filters** - excluded terms (senior, lead, SDE-2, frontend, android, security, devrel, ...)
+   reject the role. HN posts whose header names no specific engineering role are left as skip.
 2. **Role family** - backend, cloud, full-stack, AI-application, ML, data, platform, or generic SDE.
    Families are tiered primary / secondary / stretch, which weights the final score.
 3. **Track** - internship, new-grad, or unspecified (unspecified scores lower: many are secretly mid-level).
@@ -108,11 +109,13 @@ Each opening goes through these checks in order. Anything rejected records why, 
    Unstated experience is expected for internships and new-grad roles; elsewhere it scores lower.
 5. **Freshness** - postings older than a year are rejected as evergreen; older than ~4 months lose 10 points.
 6. **Location** - preferred Indian cities > remote open to India > other Indian cities > remote (region unclear).
-   Remote roles restricted to other regions (including "remote" listed only with foreign countries)
-   are rejected; onsite roles abroad are kept only when the posting signals visa sponsorship or
-   relocation support, and never when it asks for US citizenship, a security clearance or ITAR status.
+   Remote roles restricted to other regions are rejected - including remote tied to a foreign place
+   ("Remote - Ireland", "Remote, San Francisco, CA", "residents only"). Onsite roles abroad are kept
+   only when the posting offers visa sponsorship (relocation help alone doesn't count), and never when
+   it asks for US citizenship, a security clearance or ITAR status.
 7. **Skills** - weighted keyword match against your resume; skills you don't have yet pull the score
-   down, except for internships and new-grad roles.
+   down, except for internships and new-grad roles. Fresher roles in a core family and a preferred
+   city get at least 25/50 (`fresher_skill_floor`), since intern JDs often name few skills.
 8. **Startup bonus** - companies of up to 300 people (or with small job boards when headcount is unknown) get +6.
 
 ```

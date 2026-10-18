@@ -1,0 +1,53 @@
+{
+ "hits": [
+  {
+   "objectID": "60001",
+   "parent_id": 49922569,
+   "story_id": 49922569,
+   "author": "cjs",
+   "created_at": "2026-10-01T10:00:00Z",
+   "comment_text": "CareerJumpShip | Multiple engineering + go-to-market roles | Remote-first | Full-time<p>We're a small team building backend services in Python and FastAPI on AWS. New grads and interns welcome."
+  },
+  {
+   "objectID": "60002",
+   "parent_id": 49922569,
+   "story_id": 49922569,
+   "author": "irash",
+   "created_at": "2026-10-02T10:00:00Z",
+   "comment_text": "Irash Tech | Remote (Worldwide) | https:&#x2F;&#x2F;irash.tech<p>Hiring a backend developer: Python, FastAPI, PostgreSQL, AWS. New grads welcome."
+  },
+  {
+   "objectID": "60003",
+   "parent_id": 49922569,
+   "story_id": 49922569,
+   "author": "acme",
+   "created_at": "2026-10-02T11:00:00Z",
+   "comment_text": "Acme | Founding Engineer | Remote (Worldwide) | Full-time<p>Backend in Python and FastAPI on AWS with PostgreSQL. New grads welcome."
+  },
+  {
+   "objectID": "60004",
+   "parent_id": 49922569,
+   "story_id": 49922569,
+   "author": "hakk",
+   "created_at": "2026-10-02T12:00:00Z",
+   "comment_text": "StartupHakk | AI Engineer Apprentice | Remote (UT or ID residents only) | start now<p>Python, LLMs, APIs. New grads welcome."
+  },
+  {
+   "objectID": "60005",
+   "parent_id": 49922569,
+   "story_id": 49922569,
+   "author": "beta",
+   "created_at": "2026-10-02T13:00:00Z",
+   "comment_text": "Beta | Backend Engineer | Remote, San Francisco | Full-time<p>Python, FastAPI, AWS. New grads welcome."
+  },
+  {
+   "objectID": "60006",
+   "parent_id": 49922569,
+   "story_id": 49922569,
+   "author": "gamma",
+   "created_at": "2026-10-02T14:00:00Z",
+   "comment_text": "Gamma | Backend Engineer | Remote (EST hours) | Full-time<p>Python, FastAPI, AWS. New grads welcome."
+  }
+ ],
+ "nbPages": 1
+}

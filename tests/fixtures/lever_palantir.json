@@ -41,5 +41,19 @@
       {"text": "Benefits", "content": "<li>Time off for military service and medical events</li>"}
     ],
     "additionalPlain": ""
+  },
+  {
+    "id": "com-2",
+    "text": "Forward Deployed Software Engineer, New Grad - Commercial",
+    "categories": {"commitment": "Full-time", "department": "Engineering", "location": "Chicago, IL", "allLocations": ["Chicago, IL"]},
+    "createdAt": 1782700000000,
+    "hostedUrl": "https://jobs.lever.co/palantir/com-2",
+    "applyUrl": "https://jobs.lever.co/palantir/com-2/apply",
+    "workplaceType": "onsite",
+    "descriptionPlain": "New grads welcome. Python, Java, distributed systems, APIs, backend services.",
+    "lists": [
+      {"text": "Benefits", "content": "<li>Commuter benefits</li><li>Relocation assistance</li><li>Take what you need paid time off</li>"}
+    ],
+    "additionalPlain": ""
   }
 ]

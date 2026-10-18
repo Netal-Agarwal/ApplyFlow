@@ -119,6 +119,18 @@ title_exclude:
   - solutions engineer
   - sales engineer
   - support engineer
+  # security roles aren't a target
+  - security engineer
+  - application security
+  - appsec
+  - infosec
+  - penetration
+  - security analyst
+  # developer relations isn't an engineering-track fresher role
+  - developer relations
+  - devrel
+  - developer advocate
+  - evangelist
 
 # ---------------------------------------------------------------------------
 # Experience. Openings requiring more than this many years are rejected.
@@ -212,6 +224,9 @@ tiers:
 # Only these tracks can reach tier A; an unspecified-track role tops out at B,
 # since it may be secretly mid-level.
 a_tier_tracks: ["internship", "new_grad"]
+# Internship / new-grad roles in a primary family and a preferred city get at least this
+# many skill points (of 50): intern JDs often name only a couple of skills. 0 turns it off.
+fresher_skill_floor: 25
 
 # ---------------------------------------------------------------------------
 # Freshness, from the date the board (re)published the posting.

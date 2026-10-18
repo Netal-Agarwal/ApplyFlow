@@ -74,7 +74,7 @@ class LocationTests(unittest.TestCase):
 class SponsorshipTests(unittest.TestCase):
     def test_signals(self):
         self.assertEqual(detect_sponsorship("We offer visa sponsorship and relocation support."), "positive")
-        self.assertEqual(detect_sponsorship("Relocation assistance available."), "positive")
+        self.assertEqual(detect_sponsorship("Relocation assistance available."), "unknown")   # no visa word
         self.assertEqual(detect_sponsorship("We do not offer visa sponsorship."), "negative")
         self.assertEqual(detect_sponsorship("We are unable to sponsor visas."), "negative")
         self.assertEqual(detect_sponsorship("Must be authorized to work in the US."), "negative")

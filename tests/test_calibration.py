@@ -29,7 +29,7 @@ class AshbyRemoteTests(unittest.TestCase):
         self.assertFalse(job.remote)
         r = score_job(job, self.profile, TODAY)
         self.assertEqual(r.location_class, "abroad_onsite")
-        self.assertEqual(r.action, "apply")           # kept only because it offers relocation
+        self.assertEqual(r.tier, "rejected")          # relocation support alone isn't a visa (round 2)
 
     def test_is_remote_flag_alone_is_ignored(self):
         job = self.jobs["h2"]
@@ -76,7 +76,7 @@ class USOnlyRoleTests(unittest.TestCase):
     def test_signals(self):
         self.assertEqual(sponsorship_signal("Must be a US citizen.")[0], "negative")
         self.assertEqual(sponsorship_signal("Must be eligible for clearance.")[0], "negative")
-        self.assertEqual(sponsorship_signal("Relocation assistance; time off for military service")[0], "positive")
+        self.assertEqual(sponsorship_signal("Relocation assistance; time off for military service")[0], "unknown")
 
 
 def job(title="Backend Engineer - New Grad", description="0-1 years experience. Python, FastAPI, AWS, REST APIs.",

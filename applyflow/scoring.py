@@ -69,6 +69,24 @@ def classify_family(job: Job, profile: Profile) -> RoleFamily | None:
     return None
 
 
+_ROLE_NOUN = re.compile(
+    r"\b(engineers?|developers?|devs?|swes?|sdes?|programmers?|interns?|internships?|mts|technical staff)\b", re.I)
+
+
+def vague_hn_roles(job: Job, profile: Profile) -> bool:
+    """An HN header like "Multiple engineering + go-to-market roles" or no roles at all ("(see post)").
+
+    Such a post may still fit (the family came from its body), but the header names no role to
+    pitch for, so it is left for a human to read.
+    """
+    if job.source != "hn":
+        return False
+    roles = hn_role_text(job.title)
+    if any(contains_phrase(roles, p) for f in profile.role_families for p in f.title_patterns):
+        return False
+    return not _ROLE_NOUN.search(roles)
+
+
 # ---------------------------------------------------------------------------
 # Track: internship / new grad / unspecified
 # ---------------------------------------------------------------------------
@@ -166,7 +184,23 @@ LOCATION_RANK = [
 ]
 
 
-def _classify_location_string(text: str, profile: Profile) -> str:
+_RESIDENTS_RE = re.compile(r"\bresidents?\s+(only|of)\b", re.I)
+# Words that can sit next to "Remote" without naming a place ("Remote-first", "Full Time,
+# Remote", "Remote (EST hours)"). Anything else capitalised is taken to be a place.
+_REMOTE_NOISE = {
+    "remote", "first", "only", "full", "time", "part", "hybrid", "work", "from", "home", "wfh",
+    "distributed", "team", "friendly", "ok", "okay", "possible", "available", "flexible", "timezone",
+    "timezones", "hours", "async", "and", "or", "the", "in", "of", "with", "based", "any", "office",
+    "optional", "contract", "permanent", "role", "roles", "position", "positions", "anywhere",
+    "est", "edt", "pst", "pdt", "cst", "mst", "et", "pt", "ct", "cet", "gmt", "utc", "bst", "ist",
+}
+
+
+def _names_place(text: str) -> bool:
+    return any(w[0].isupper() and w.lower() not in _REMOTE_NOISE for w in re.findall(r"[^\W\d_]+", text))
+
+
+def _classify_location_string(text: str, profile: Profile, check_places: bool = True) -> str:
     loc = profile.locations
     lowered = text.lower()
     if any(contains_phrase(lowered, m) for m in loc.get("preferred_india", [])):
@@ -174,7 +208,13 @@ def _classify_location_string(text: str, profile: Profile) -> str:
     if re.search(r"\b(remote|anywhere|distributed|wfh|work from home)\b", lowered):
         if any(contains_phrase(lowered, m) for m in loc.get("remote_open_markers", [])):
             return "remote_open"
+        if any(contains_phrase(lowered, m) for m in loc.get("other_india", [])):
+            return "remote_open"            # "Remote - Pune": an Indian place
         if any(contains_phrase(lowered, m) for m in loc.get("remote_restricted_markers", [])):
+            return "remote_restricted"
+        # "Remote - Ireland", "Remote, San Francisco, CA", "Remote (UT or ID residents only)":
+        # remote tied to a foreign place means remote from there.
+        if _RESIDENTS_RE.search(text) or (check_places and _names_place(text)):
             return "remote_restricted"
         return "remote_unclear"
     if any(contains_phrase(lowered, m) for m in loc.get("other_india", [])):
@@ -183,11 +223,17 @@ def _classify_location_string(text: str, profile: Profile) -> str:
 
 
 def classify_location(job: Job, profile: Profile) -> str:
-    texts = list(job.locations)
     if job.source == "hn":
-        # The HN header mixes locations with other notes; read the whole first line.
-        texts = [job.description.split("\n", 1)[0]]
-    classes = [_classify_location_string(t, profile) for t in texts if t.strip()]
+        # The HN header mixes locations with other notes; read the whole first line for
+        # markers, but look for foreign places only in the parsed location segments.
+        first_line = job.description.split("\n", 1)[0]
+        cls = _classify_location_string(first_line, profile, check_places=False) if first_line.strip() else "unknown"
+        if cls == "remote_unclear" and any(
+                _classify_location_string(t, profile) == "remote_restricted" for t in job.locations):
+            cls = "remote_restricted"
+        classes = [cls] if cls != "unknown" else []
+    else:
+        classes = [_classify_location_string(t, profile) for t in job.locations if t.strip()]
     if job.remote and not any(c.startswith("remote") for c in classes):
         # A remote flag next to only foreign places ("Canada | London | United States")
         # means remote within those countries, not open to India.
@@ -212,13 +258,19 @@ _SPONSOR_NEGATIVE = re.compile(
     r"|sponsorship\s+(is\s+)?not\s+(available|provided|offered)",
     re.I,
 )
+# Only a visa / sponsorship / immigration statement counts for an onsite role abroad.
 _SPONSOR_POSITIVE = re.compile(
     r"visa\s+sponsorship\s+(is\s+)?(available|provided|offered)"
     r"|(we|will|can|happy to|able to)\s+(will\s+|can\s+)?sponsor"
     r"|sponsor(ing)?\s+(work\s+)?visas?"
-    r"|relocation\s+(support|assistance|package|bonus|help)"
-    r"|(we|will)\s+(help\s+you\s+)?relocate"
-    r"|\bvisa\b[^.\n]{0,40}\b(support|sponsor)",
+    r"|\bvisa\b[^.\n]{0,40}\b(support|sponsor)"
+    r"|relocat\w*[^.\n]{0,60}\b(visas?|immigration|work\s+permits?)\b"
+    r"|\b(immigration|work\s+permit)\s+(support|assistance|sponsorship)",
+    re.I,
+)
+# Relocation help on its own is usually a domestic benefit (Palantir's US benefits list).
+_RELOCATION_ONLY = re.compile(
+    r"relocation\s+(support|assistance|package|bonus|help)|(we|will)\s+(help\s+you\s+)?relocate",
     re.I,
 )
 
@@ -237,7 +289,10 @@ _ITAR = re.compile(r"\bITAR\b")   # case-sensitive: "military" contains "itar"
 
 
 def sponsorship_signal(text: str) -> tuple[str, str]:
-    """Return (positive | negative | unknown, the phrase that decided it)."""
+    """Return (positive | negative | unknown, the phrase that decided it).
+
+    "unknown" carries the relocation phrase when relocation help is all the posting offers.
+    """
     for pattern in (_US_ONLY, _ITAR, _SPONSOR_NEGATIVE):
         m = pattern.search(text)
         if m:
@@ -245,7 +300,8 @@ def sponsorship_signal(text: str) -> tuple[str, str]:
     m = _SPONSOR_POSITIVE.search(text)
     if m:
         return "positive", m.group(0)
-    return "unknown", ""
+    m = _RELOCATION_ONLY.search(text)
+    return "unknown", m.group(0) if m else ""
 
 
 def detect_sponsorship(text: str) -> str:
@@ -397,8 +453,12 @@ def score_job(job: Job, profile: Profile, today: date | None = None) -> ScoreRes
         return _reject(job, f"Indian city outside your preferred list ({job.location_text})", **common)
     if location_class == "abroad_onsite" and profile.locations.get("abroad_requires_sponsorship", True):
         if sponsorship != "positive":
-            detail = (f"says no sponsorship ('{sponsor_phrase}')" if sponsorship == "negative"
-                      else "no sponsorship signal")
+            if sponsorship == "negative":
+                detail = f"says no sponsorship ('{sponsor_phrase}')"
+            elif sponsor_phrase:
+                detail = f"no sponsorship signal ('{sponsor_phrase}' without a visa isn't sponsorship)"
+            else:
+                detail = "no sponsorship signal"
             return _reject(job, f"onsite abroad ({job.location_text}) and {detail}", **common)
 
     reasons: list[str] = [f"role family: {family.name} ({family.tier})"]
@@ -412,6 +472,13 @@ def score_job(job: Job, profile: Profile, today: date | None = None) -> ScoreRes
         reasons.append(f"skill gaps ignored for {track} roles: {', '.join(negatives)}")
     elif negatives:
         reasons.append(f"skill gaps pulling it down: {', '.join(negatives)}")
+    # Intern JDs often name only a couple of skills; a core-family fresher role in a
+    # preferred city shouldn't sink because of that.
+    floor = profile.fresher_skill_floor
+    if (fresher and family.tier == "primary" and location_class == "preferred_india"
+            and skill_points < floor):
+        skill_points = float(floor)
+        reasons.append(f"skill floor: thin {track} JD, {family.tier} family in a preferred city -> {floor}/50")
 
     location_points = LOCATION_POINTS[location_class]
     reasons.append(f"location: {location_class} -> {location_points}/20 ({job.location_text or 'not stated'})")
@@ -447,9 +514,13 @@ def score_job(job: Job, profile: Profile, today: date | None = None) -> ScoreRes
     if weight != 1.0:
         reasons.append(f"{family.tier} family weight x{weight}")
     if sponsorship == "positive":
-        reasons.append(f"posting signals visa sponsorship / relocation support ('{sponsor_phrase}')")
+        reasons.append(f"posting signals visa sponsorship ('{sponsor_phrase}')")
 
-    if score >= profile.tiers["A"] and track in profile.a_tier_tracks:
+    if vague_hn_roles(job, profile):
+        tier = "skip"
+        reasons.append(f"vague HN post: header roles '{job.title}' name no specific engineering role "
+                       f"-> skip (read the post yourself)")
+    elif score >= profile.tiers["A"] and track in profile.a_tier_tracks:
         tier = "A"
     elif score >= profile.tiers["A"]:
         tier = "B"

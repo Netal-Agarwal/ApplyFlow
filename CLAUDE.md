@@ -76,17 +76,26 @@ boilerplate ATS emails, Greenhouse board names, mid-level titles, fresher roles 
 HN "(X role, not a Y role)" headers.
 Live 2026-10-18: A=2, B=42, skip=64 -> A=4, B=17, skip=26 (~5,400 openings, 34 boards + HN).
 
-Round 2, seen on the 2026-10-18 run, roughly in priority order:
+Round 2 (2026-10-19) is done - 7 items, see `tests/test_calibration_round2.py`: security and
+devrel titles excluded, remote tied to a foreign place / "residents only" is restricted, relocation
+without a visa word isn't sponsorship, `fresher_skill_floor` (25/50) for primary-family fresher
+roles in preferred cities, vague HN headers ("Multiple ... roles", "(see post)") -> skip. Odoo's
+"Visa sponsorship + relocation support" was checked and is a genuine offer.
+Live: A=4, B=17, skip=26 -> A=4, B=11, skip=24 (5,394 openings). Then 2x `discover` (+17 boards,
++63 email candidates): 5,538 openings, A=4, B=12, skip=25.
 
-1. **Security roles reach A.** FamPay "Security Engineer Intern" is the top A row: it matches
-   sde_generic via "engineer intern". Consider "security engineer" in `title_exclude` (or a
-   stretch family) if security isn't a target.
-2. **Remote + one foreign place stays `remote_unclear`.** Twilio "Remote - Ireland", Supabase
-   "Remote, San Francisco, CA", StartupHakk "Remote (UT or ID residents only)". Treat "Remote -
-   <non-India place>" as restricted; add "residents only"/"ireland" style markers.
-3. **Domestic relocation counts as sponsorship.** Palantir "FDSE, New Grad - Commercial" (Chicago)
-   is B only because "Relocation assistance" appears in its benefits list. Consider requiring a visa
-   word for abroad roles, or weighting relocation-only signals lower.
-4. **Thin intern JDs stay in B.** Rubrik "Software Engineer (CPD) - Winter Intern" scores 64: its JD
-   names only python/java/cloud. Options: lower tier A to ~62, or a skill floor for primary-family
-   fresher roles in preferred cities.
+Round 3, seen on the 2026-10-19 runs, roughly in priority order:
+
+1. **Discovery attaches same-name companies' boards.** Slug guessing found `lever:bloom` (a Toronto
+   PR agency), `ashby:asimov` (a biotech) and `lever:sapling` (one posting titled "pr9jp") for
+   unrelated YC startups. Verify a probed board before saving it, e.g. the posting URLs/text mention
+   the company's website domain, or the board's company name matches.
+2. **Discovery checks the smallest teams first.** The 80 companies checked were mostly 2-5 people
+   in the US; 17 new boards added 1 B row. Prioritise India-located companies and teams of ~10-300.
+3. **"Solution engineer" (singular) slips through.** Netomi "Agentic Solution Engineer" (Gurugram)
+   is B 58; `title_exclude` only has "solutions engineer".
+4. **Unspecified-track roles fill B** (11 of 12). Worth checking whether some state a fresher-friendly
+   range ("0-2 years") the track detector misses, or whether B should need a fresher signal.
+5. **HN "hybrid / remote available" + visa.** Typify "San Francisco (hybrid / remote available)",
+   "VISA" is now `remote_restricted`; it may deserve the abroad-with-sponsorship path. Low priority
+   (it was skip before).

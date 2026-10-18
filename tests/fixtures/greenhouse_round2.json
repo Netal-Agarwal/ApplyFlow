@@ -1,0 +1,71 @@
+{
+ "jobs": [
+  {
+   "id": 3001,
+   "title": "Security Engineer Intern",
+   "absolute_url": "https://boards.greenhouse.io/round2/jobs/3001",
+   "location": {"name": "Bengaluru"},
+   "updated_at": "2026-10-01T10:00:00+05:30",
+   "first_published": "2026-09-23T10:00:00+05:30",
+   "company_name": "Round2",
+   "departments": [{"id": 1, "name": "Security"}],
+   "content": "&lt;p&gt;6-month internship. Python, AWS, APIs, Java, JavaScript, cloud security.&lt;/p&gt;"
+  },
+  {
+   "id": 3002,
+   "title": "Software Engineer (Observability)",
+   "absolute_url": "https://boards.greenhouse.io/round2/jobs/3002",
+   "location": {"name": "Remote - Ireland"},
+   "updated_at": "2026-10-01T10:00:00+00:00",
+   "first_published": "2026-09-05T10:00:00+00:00",
+   "company_name": "Round2",
+   "departments": [{"id": 1, "name": "Engineering"}],
+   "content": "&lt;p&gt;Python, AWS, PostgreSQL, distributed systems, APIs.&lt;/p&gt;"
+  },
+  {
+   "id": 3003,
+   "title": "Platform Engineer, Managed Postgres",
+   "absolute_url": "https://boards.greenhouse.io/round2/jobs/3003",
+   "location": {"name": "Remote, San Francisco, CA"},
+   "updated_at": "2026-10-01T10:00:00+00:00",
+   "first_published": "2026-09-21T10:00:00+00:00",
+   "company_name": "Round2",
+   "departments": [{"id": 1, "name": "Engineering"}],
+   "content": "&lt;p&gt;Postgres, AWS, Python, backend, APIs.&lt;/p&gt;"
+  },
+  {
+   "id": 3004,
+   "title": "Software Engineer (CPD) - Winter Intern",
+   "absolute_url": "https://boards.greenhouse.io/round2/jobs/3004",
+   "location": {"name": "Bangalore"},
+   "updated_at": "2026-10-01T10:00:00+05:30",
+   "first_published": "2026-09-06T10:00:00+05:30",
+   "company_name": "Round2 Job Board",
+   "departments": [{"id": 1, "name": "Engineering"}],
+   "content": "&lt;p&gt;Winter internship from January 2027 on our cloud data protection team. Python or Java; familiarity with Scala is a plus. Cloud basics.&lt;/p&gt;"
+  },
+  {
+   "id": 3005,
+   "title": "Developer Relations Engineer",
+   "absolute_url": "https://boards.greenhouse.io/round2/jobs/3005",
+   "location": {"name": "Bengaluru"},
+   "updated_at": "2026-10-01T10:00:00+05:30",
+   "first_published": "2026-09-21T10:00:00+05:30",
+   "company_name": "Round2",
+   "departments": [{"id": 1, "name": "DevRel"}],
+   "content": "&lt;p&gt;New grads welcome. Python, JavaScript, APIs, Postgres.&lt;/p&gt;"
+  },
+  {
+   "id": 3006,
+   "title": "Software Developer",
+   "absolute_url": "https://boards.greenhouse.io/round2/jobs/3006",
+   "location": {"name": "Hybrid (Belgium, 3 days/week)"},
+   "updated_at": "2026-10-04T10:00:00+02:00",
+   "first_published": "2026-10-04T10:00:00+02:00",
+   "company_name": "Round2",
+   "departments": [{"id": 1, "name": "R&amp;D"}],
+   "content": "&lt;p&gt;Python, PostgreSQL, JavaScript.&lt;/p&gt;&lt;p&gt;What we offer&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Visa sponsorship + relocation support&lt;/li&gt;&lt;li&gt;Meal vouchers&lt;/li&gt;&lt;/ul&gt;"
+  }
+ ],
+ "meta": {"total": 6}
+}

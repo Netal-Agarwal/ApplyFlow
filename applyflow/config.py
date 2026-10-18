@@ -73,6 +73,7 @@ class Profile:
     startup: dict[str, Any] = field(default_factory=dict)
     freshness: dict[str, Any] = field(default_factory=dict)
     a_tier_tracks: list[str] = field(default_factory=lambda: ["internship", "new_grad"])
+    fresher_skill_floor: int = 25          # min skill points (of 50); 0 turns the floor off
     discovery: dict[str, Any] = field(default_factory=dict)
     source_path: Path = field(default=PROFILE_PATH)
 
@@ -132,6 +133,7 @@ def parse_profile(data: dict[str, Any], source_path: Path = PROFILE_PATH) -> Pro
         startup={**DEFAULT_STARTUP, **(data.get("startup") or {})},
         freshness={**DEFAULT_FRESHNESS, **(data.get("freshness") or {})},
         a_tier_tracks=list(data.get("a_tier_tracks") or ["internship", "new_grad"]),
+        fresher_skill_floor=int(data.get("fresher_skill_floor", 25)),
         discovery={**DEFAULT_DISCOVERY, **(data.get("discovery") or {})},
         source_path=source_path,
     )
