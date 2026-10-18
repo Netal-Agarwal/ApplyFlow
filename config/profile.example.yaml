@@ -82,6 +82,10 @@ title_exclude:
   - lead
   - staff
   - principal
+  - intermediate
+  - mid-level
+  - mid level         # also matches "mid-level"
+  - experienced
   - architect
   - manager
   - director

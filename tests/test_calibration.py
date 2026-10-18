@@ -192,5 +192,17 @@ class CompanyNameTests(unittest.TestCase):
 
 
 
+class MidLevelTitleTests(unittest.TestCase):
+    """7. 'Intermediate', 'mid-level' and 'experienced' titles aren't fresher roles."""
+
+    def test_excluded(self):
+        profile = example_profile()
+        for title in ("Intermediate Backend Engineer, India", "Mid-Level Software Engineer",
+                      "Mid Level Backend Developer", "Experienced Python Developer"):
+            r = score_job(job(title, locations=["Bangalore, India"]), profile, TODAY)
+            self.assertEqual(r.tier, "rejected", title)
+            self.assertIn("title contains excluded term", r.reasons[0])
+
+
 if __name__ == "__main__":
     unittest.main()
