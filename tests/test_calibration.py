@@ -5,12 +5,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from applyflow.collectors import AshbyCollector, LeverCollector
+from applyflow.collectors import AshbyCollector, GreenhouseCollector, HNWhoIsHiringCollector, LeverCollector
 from applyflow.models import Company, Job
 from applyflow.pipeline import score_all
 from applyflow.report import write_csv
 from applyflow.scoring import normalized_title, score_job, sponsorship_signal
 from applyflow.store import Store
+from applyflow.text import extract_contact_emails
 from tests.helpers import TODAY, example_profile, fixture
 
 
@@ -149,6 +150,33 @@ class DuplicateTests(unittest.TestCase):
                 rows = {r["id"]: r for r in csv.DictReader(fh)}
         self.assertEqual(rows["greenhouse:1"]["location"], "Hyderabad | Bengaluru | Pune")
         self.assertEqual(self.store.stats()["top_reject_reasons"], [("duplicate posting", 2)])
+
+
+
+class BoilerplateEmailTests(unittest.TestCase):
+    """5. ATS emails from accommodation / EEO / privacy / scam-warning paragraphs are dropped."""
+
+    @classmethod
+    def setUpClass(cls):
+        jobs = GreenhouseCollector.parse(fixture("greenhouse_rubrik.json"), Company("Rubrik", "greenhouse", "rubrik"))
+        cls.jobs = {j.external_id: j for j in jobs}
+
+    def test_accommodation_email_dropped(self):
+        self.assertEqual(self.jobs["2001"].emails, [])
+
+    def test_application_email_kept(self):
+        self.assertEqual(self.jobs["2002"].emails, ["noopur.mer@rubrik.com"])
+
+    def test_contact_emails(self):
+        self.assertEqual(extract_contact_emails("HOW TO APPLY Email hiring@composio.dev with your resume"),
+                         ["hiring@composio.dev"])
+        self.assertEqual(extract_contact_emails("Need an alternative method for applying? Email recruiting@x.com"), [])
+
+    def test_hn_keeps_every_email(self):
+        hit = {"objectID": "9", "parent_id": "1", "created_at": "2026-10-02T10:00:00Z",
+               "comment_text": "Acme | Backend Intern | Bengaluru<p>Privacy-first payments. Email jobs@acme.dev</p>"}
+        self.assertEqual(HNWhoIsHiringCollector.parse([hit], "1")[0].emails, ["jobs@acme.dev"])
+
 
 
 if __name__ == "__main__":

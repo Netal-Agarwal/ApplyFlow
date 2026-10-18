@@ -10,7 +10,7 @@ from typing import Any
 
 from applyflow.http import PoliteClient
 from applyflow.models import Company, Job
-from applyflow.text import extract_emails, html_to_text
+from applyflow.text import extract_contact_emails, html_to_text
 
 BASE = "https://boards-api.greenhouse.io/v1/boards"
 
@@ -51,7 +51,7 @@ class GreenhouseCollector:
                     remote=True if "remote" in location.lower() else None,
                     department=departments,
                     posted_at=raw.get("first_published") or raw.get("updated_at") or "",
-                    emails=extract_emails(description),
+                    emails=extract_contact_emails(description),
                     board_size=board_size,
                 )
             )

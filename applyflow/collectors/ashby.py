@@ -10,7 +10,7 @@ from typing import Any
 
 from applyflow.http import PoliteClient
 from applyflow.models import Company, Job
-from applyflow.text import extract_emails, html_to_text
+from applyflow.text import extract_contact_emails, html_to_text
 
 BASE = "https://api.ashbyhq.com/posting-api/job-board"
 
@@ -67,7 +67,7 @@ class AshbyCollector:
                     employment_type=raw.get("employmentType") or "",
                     department=department,
                     posted_at=raw.get("publishedAt") or "",
-                    emails=extract_emails(description),
+                    emails=extract_contact_emails(description),
                     board_size=board_size,
                 )
             )

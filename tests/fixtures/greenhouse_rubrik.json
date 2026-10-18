@@ -1,0 +1,43 @@
+{
+ "jobs": [
+  {
+   "id": 2001,
+   "title": "Software Engineer (CPD) - Winter Intern",
+   "absolute_url": "https://boards.greenhouse.io/rubrik/jobs/2001",
+   "location": {
+    "name": "Bangalore"
+   },
+   "updated_at": "2026-10-01T10:00:00-04:00",
+   "first_published": "2026-09-06T10:00:00-04:00",
+   "company_name": "Rubrik Job Board",
+   "departments": [
+    {
+     "id": 1,
+     "name": "Engineering"
+    }
+   ],
+   "content": "&lt;p&gt;6-month internship from January 2027. Python, REST APIs, AWS, distributed systems.&lt;/p&gt;&lt;p&gt;Rubrik is an Equal Opportunity Employer. We provide reasonable accommodations to applicants with disabilities in accordance with applicable law. If you need an accommodation to participate in the application process or to perform your job, please contact hr@rubrik.com. Accommodations may include changes to the application process.&lt;/p&gt;"
+  },
+  {
+   "id": 2002,
+   "title": "Software Engineer - New Grad",
+   "absolute_url": "https://boards.greenhouse.io/rubrik/jobs/2002",
+   "location": {
+    "name": "Bangalore"
+   },
+   "updated_at": "2026-10-01T10:00:00-04:00",
+   "first_published": "2026-10-06T10:00:00-04:00",
+   "company_name": "Rubrik Job Board",
+   "departments": [
+    {
+     "id": 1,
+     "name": "Engineering"
+    }
+   ],
+   "content": "&lt;p&gt;New grads welcome. Python, Postgres, REST APIs.&lt;/p&gt;&lt;p&gt;Please send us your resume and a link to your work to noopur.mer@rubrik.com.&lt;/p&gt;&lt;p&gt;Rubrik is an Equal Opportunity Employer. We provide reasonable accommodations to applicants with disabilities in accordance with applicable law. If you need an accommodation to participate in the application process or to perform your job, please contact hr@rubrik.com. Accommodations may include changes to the application process.&lt;/p&gt;&lt;p&gt;To exercise your rights or for any data privacy enquiries, please contact: privacy@rubrik.com&lt;/p&gt;&lt;p&gt;Suspicious messages can be reported to security@rubrik.com.&lt;/p&gt;"
+  }
+ ],
+ "meta": {
+  "total": 2
+ }
+}

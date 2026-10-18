@@ -83,3 +83,36 @@ def extract_emails(text: str) -> list[str]:
             seen.add(email)
             unique.append(email)
     return unique
+
+
+# ATS postings end in legal boilerplate: "If you need an accommodation ... contact
+# hr@rubrik.com", privacy notices, scam warnings. Those addresses aren't for applicants.
+_BOILERPLATE_RE = re.compile(
+    r"accommodat|disabilit|\beeo\b|equal (employment )?opportunity|privacy|personal data|"
+    r"\bbenefits?\b|fraud|scam|suspicious|legitimate|alternative method|unable to access",
+    re.I,
+)
+_BOILERPLATE_LOCAL_PARTS = ("privacy", "security", "accommodation", "accommodations", "legal",
+                            "benefits", "accessibility", "dataprotection", "dpo", "gdpr")
+
+
+def extract_contact_emails(text: str) -> list[str]:
+    """Emails a job board posting invites applicants to use, without EEO/privacy boilerplate ones."""
+    lowered = text.lower()
+    kept = []
+    for email in extract_emails(text):
+        local = email.split("@", 1)[0]
+        if local in _BOILERPLATE_LOCAL_PARTS:
+            continue
+        at = lowered.find(email)
+        if at < 0:
+            at = lowered.find(local + "@")
+        window = ""
+        if at >= 0:     # the email's own paragraph: up to 200 chars before it, 60 after
+            start = max(at - 200, lowered.rfind("\n", 0, at) + 1)
+            end = lowered.find("\n", at)
+            window = lowered[start: min(at + len(email) + 60, end if end >= 0 else len(lowered))]
+        if _BOILERPLATE_RE.search(window):
+            continue
+        kept.append(email)
+    return kept

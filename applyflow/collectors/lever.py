@@ -11,7 +11,7 @@ from typing import Any
 
 from applyflow.http import PoliteClient
 from applyflow.models import Company, Job
-from applyflow.text import extract_emails, html_to_text
+from applyflow.text import extract_contact_emails, html_to_text
 
 BASE = "https://api.lever.co/v0/postings"
 
@@ -74,7 +74,7 @@ class LeverCollector:
                     employment_type=cats.get("commitment") or "",
                     department=department,
                     posted_at=posted_at,
-                    emails=extract_emails(description),
+                    emails=extract_contact_emails(description),
                     board_size=board_size,
                 )
             )
