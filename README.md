@@ -105,17 +105,23 @@ Each opening goes through these checks in order. Anything rejected records why, 
    Families are tiered primary / secondary / stretch, which weights the final score.
 3. **Track** - internship, new-grad, or unspecified (unspecified scores lower: many are secretly mid-level).
 4. **Experience** - "3+ years of experience" style requirements above your limit reject the role.
-5. **Location** - preferred Indian cities > remote open to India > other Indian cities > remote (region unclear).
-   Remote roles restricted to other regions are rejected; onsite roles abroad are kept only when the
-   posting signals visa sponsorship or relocation support.
-6. **Skills** - weighted keyword match against your resume; skills you don't have yet pull the score down.
-7. **Startup bonus** - companies of up to 300 people (or with small job boards when headcount is unknown) get +6.
+   Unstated experience is expected for internships and new-grad roles; elsewhere it scores lower.
+5. **Freshness** - postings older than a year are rejected as evergreen; older than ~4 months lose 10 points.
+6. **Location** - preferred Indian cities > remote open to India > other Indian cities > remote (region unclear).
+   Remote roles restricted to other regions (including "remote" listed only with foreign countries)
+   are rejected; onsite roles abroad are kept only when the posting signals visa sponsorship or
+   relocation support, and never when it asks for US citizenship, a security clearance or ITAR status.
+7. **Skills** - weighted keyword match against your resume; skills you don't have yet pull the score
+   down, except for internships and new-grad roles.
+8. **Startup bonus** - companies of up to 300 people (or with small job boards when headcount is unknown) get +6.
 
 ```
-score = family weight × (skills 0-50 + location 0-20 + track 0-20 + experience 0-10 + startup bonus)
+score = family weight × (skills 0-50 + location 0-20 + track 0-20 + experience 0-10 + startup bonus
+                        - stale penalty)
 ```
 
-Tier A ≥ 70, tier B ≥ 45 (configurable). Each kept opening also gets an **action**:
+Tier A ≥ 70 (internship and new-grad roles only; others top out at B), tier B ≥ 45 (configurable).
+The same opening posted once per city is merged into one row listing every location. Each kept opening also gets an **action**:
 
 - **Apply** - large companies (big job boards) and sponsored relocation roles: their formal process is the way in.
 - **Email** - HN posts that ask applicants to email someone.

@@ -66,39 +66,25 @@ python -m applyflow explain "..." # why one job scored what it did
 pytest
 ```
 
-## Calibration backlog (from the first live run, 2026-10-11)
+## Calibration backlog
 
-First live run: 4,543 openings from 25 sources -> A=0, B=37, skip=57, rejected=4,449.
-The B list (`output/opportunities.csv`) exposed these problems, roughly in priority order.
-Fix each with a test, then re-run live and compare `stats` before/after.
+Round 1 (from the first live run, 2026-10-11) is done - 9 fixes, see `tests/test_calibration.py`:
+Ashby remote/hybrid, US-only (citizen/clearance/ITAR) roles, freshness, per-city duplicates,
+boilerplate ATS emails, Greenhouse board names, mid-level titles, fresher roles reaching A,
+HN "(X role, not a Y role)" headers.
+Live 2026-10-18: A=2, B=42, skip=64 -> A=4, B=17, skip=26 (~5,400 openings, 34 boards + HN).
 
-1. **Bogus "remote" for Ashby jobs.** Notion "SF, California" and Cohere
-   "Canada | Dubai | London | US" were classed `remote_unclear` and kept. Cause:
-   `isRemote: true` on hybrid roles. Trust remote only when `workplaceType` is
-   "Remote" (or a location string says remote); otherwise these are
-   `abroad_onsite` and need sponsorship.
-2. **Palantir US-government roles kept as "sponsored".** ~20 of 37 B rows. Likely a
-   false-positive sponsorship match in boilerplate. Add negative signals: "U.S.
-   citizen", "US person", "security clearance", "ITAR", "must be eligible for
-   clearance". Log which phrase matched in the reason string.
-3. **Stale evergreen postings.** Rows dated 2014, 2020, 2021. Add a freshness
-   factor: penalize postings older than ~120 days, reject older than ~365 unless the
-   board re-published them.
-4. **Duplicates across locations.** Same company + title appears 2-3x (one per
-   city). Group by (company, normalized title), merge locations, keep best score.
-5. **Boilerplate emails.** `hr@rubrik.com` comes from an accommodations/EEO
-   paragraph. For ATS sources, drop emails near words like accommodation,
-   disability, EEO, privacy, benefits - or keep ATS emails only when the text
-   invites applications. HN emails are fine. This matters for Phase 2.
-6. **Company names from the ATS**: "Rubrik Job Board" - prefer the seed/discovered
-   name over Greenhouse's `company_name`.
-7. **Mid-level titles slip through**: add "intermediate", "mid-level", "mid level",
-   "experienced" to `title_exclude` (GitLab "Intermediate Backend Engineer").
-8. **Nothing reaches tier A.** India internships (Rubrik winter intern 49, Stripe
-   intern Bengaluru 62) should be top-tier. Ideas: when track is internship/new_grad,
-   unstated experience is expected - score it 10/10, not 4/10; lower
-   `skill_score_cap` (30 -> ~22) because real JDs mention fewer of the listed
-   skills than fixtures; re-check tiers on real data afterwards. Target: genuine
-   India/remote fresher roles in A, US-only and evergreen noise out of A/B.
-9. **HN title parsing**: "Product Engineer (Product Manager role, not a Full-stack
-   role)" was kept as fullstack. Low priority.
+Round 2, seen on the 2026-10-18 run, roughly in priority order:
+
+1. **Security roles reach A.** FamPay "Security Engineer Intern" is the top A row: it matches
+   sde_generic via "engineer intern". Consider "security engineer" in `title_exclude` (or a
+   stretch family) if security isn't a target.
+2. **Remote + one foreign place stays `remote_unclear`.** Twilio "Remote - Ireland", Supabase
+   "Remote, San Francisco, CA", StartupHakk "Remote (UT or ID residents only)". Treat "Remote -
+   <non-India place>" as restricted; add "residents only"/"ireland" style markers.
+3. **Domestic relocation counts as sponsorship.** Palantir "FDSE, New Grad - Commercial" (Chicago)
+   is B only because "Relocation assistance" appears in its benefits list. Consider requiring a visa
+   word for abroad roles, or weighting relocation-only signals lower.
+4. **Thin intern JDs stay in B.** Rubrik "Software Engineer (CPD) - Winter Intern" scores 64: its JD
+   names only python/java/cloud. Options: lower tier A to ~62, or a skill floor for primary-family
+   fresher roles in preferred cities.
