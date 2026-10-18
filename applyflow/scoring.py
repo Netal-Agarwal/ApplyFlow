@@ -22,6 +22,15 @@ from applyflow.text import contains_phrase, matching_phrases
 # ---------------------------------------------------------------------------
 
 _ROLE_SPLIT = re.compile(r"\s*(?:;|,|/|&|\band\b|\+)\s*", re.I)
+# "Product Engineer (Product Manager role, not a Full-stack role)": the parenthetical
+# says what the role really is, and "not a ... role" must not count as a role.
+_CLARIFIED_ROLE = re.compile(r"[^,;/|()]*\(\s*([^(),;]+?)\s+(?:role|position)\b[^)]*\)", re.I)
+_NEGATED_ROLE = re.compile(r"\bnot\s+(?:an?\s+)?[^,;()]*?\b(?:role|position)\b", re.I)
+
+
+def hn_role_text(title: str) -> str:
+    """HN header roles with clarifications applied and negated roles removed."""
+    return _NEGATED_ROLE.sub("", _CLARIFIED_ROLE.sub(r"\1", title))
 
 
 def _excluded_by(title: str, profile: Profile) -> str | None:
@@ -38,7 +47,7 @@ def title_exclusion(job: Job, profile: Profile) -> str | None:
     an HN post is only excluded when *every* listed role is excluded.
     """
     if job.source == "hn":
-        roles = [r for r in _ROLE_SPLIT.split(job.title) if r.strip()]
+        roles = [r for r in _ROLE_SPLIT.split(hn_role_text(job.title)) if r.strip()]
         if not roles:
             return None
         hits = [_excluded_by(r, profile) for r in roles]
@@ -47,8 +56,9 @@ def title_exclusion(job: Job, profile: Profile) -> str | None:
 
 
 def classify_family(job: Job, profile: Profile) -> RoleFamily | None:
+    title = hn_role_text(job.title) if job.source == "hn" else job.title
     for family in profile.role_families:
-        if any(contains_phrase(job.title, p) for p in family.title_patterns):
+        if any(contains_phrase(title, p) for p in family.title_patterns):
             return family
     # HN headers are free-form; fall back to the opening of the post.
     if job.source == "hn":

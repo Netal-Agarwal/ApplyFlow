@@ -9,7 +9,7 @@ from applyflow.collectors import AshbyCollector, GreenhouseCollector, HNWhoIsHir
 from applyflow.models import Company, Job
 from applyflow.pipeline import score_all
 from applyflow.report import write_csv
-from applyflow.scoring import normalized_title, score_job, sponsorship_signal
+from applyflow.scoring import hn_role_text, normalized_title, score_job, sponsorship_signal
 from applyflow.store import Store
 from applyflow.text import extract_contact_emails
 from tests.helpers import TODAY, example_profile, fixture
@@ -259,6 +259,37 @@ class FresherTierTests(unittest.TestCase):
             self.assertGreater(rows[1]["score"], rows[0]["score"])
         finally:
             store.close()
+
+
+
+class HNTitleTests(unittest.TestCase):
+    """9. A parenthetical '(X role, not a Y role)' decides what an HN role is."""
+
+    def setUp(self):
+        self.profile = example_profile()
+
+    def hn(self, title, first_line):
+        return job(title, f"{first_line}\nPython, FastAPI, AWS.", [], source="hn")
+
+    def test_clarified_role(self):
+        self.assertEqual(hn_role_text("Product Engineer (Product Manager role, not a Full-stack role)"),
+                         "Product Manager")
+        r = score_job(self.hn("Product Engineer (Product Manager role, not a Full-stack role)",
+                              "Search Atlas | Product Engineer (Product Manager role, not a Full-stack role) | "
+                              "REMOTE (anywhere)"), self.profile, TODAY)
+        self.assertEqual(r.tier, "rejected")
+        self.assertIn("excluded term 'manager'", r.reasons[0])
+
+    def test_negated_role_dropped(self):
+        self.assertEqual(hn_role_text("Backend Engineer, not a frontend role").strip(" ,"), "Backend Engineer")
+
+    def test_role_lists_still_split(self):
+        self.assertEqual(hn_role_text("Software Engineers (Backend, Frontend, ML)"),
+                         "Software Engineers (Backend, Frontend, ML)")
+        r = score_job(self.hn("Software Engineers (Backend, Frontend, ML)",
+                              "Acme | Software Engineers (Backend, Frontend, ML) | Remote (Worldwide)"),
+                      self.profile, TODAY)
+        self.assertNotEqual(r.tier, "rejected", r.reasons)
 
 
 if __name__ == "__main__":
