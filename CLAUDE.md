@@ -51,7 +51,9 @@ Later: FastAPI + SQLAlchemy dashboard (user's own stack) replacing the CLI repor
 - Python 3.10+, deps: requests, PyYAML (pytest for dev). Keep it light.
 - Tests are offline (`pytest`), against fixtures in `tests/fixtures/` that mirror
   the real API formats. Add a fixture + test for every behaviour change.
-- One PR per step; the user reviews and merges.
+-    - One step at a time; the user reviews the uncommitted changes, then commits and pushes.
+- Never run git commit, git push, or open PRs. Leave changes uncommitted, summarize them,
+  and suggest a commit message; the user commits and pushes.
 - The user develops on Windows (cmd / PowerShell). Give Windows commands.
 - Every scoring decision appends a reason string - keep it that way; `explain`
   and `stats` depend on it.
