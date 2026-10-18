@@ -11,6 +11,7 @@ filters tunable on real data.
 from __future__ import annotations
 
 import re
+from datetime import date
 
 from applyflow.config import Profile, RoleFamily
 from applyflow.models import Job, ScoreResult
@@ -125,6 +126,19 @@ def required_years(description: str) -> int | None:
         if low <= 15:
             found.append(low)
     return max(found) if found else None
+
+
+# ---------------------------------------------------------------------------
+# Freshness
+# ---------------------------------------------------------------------------
+
+def posting_age_days(job: Job, today: date | None = None) -> int | None:
+    """Days since the board (re)published the posting, or None when the date is unknown."""
+    try:
+        posted = date.fromisoformat(job.posted_at[:10])
+    except ValueError:
+        return None
+    return ((today or date.today()) - posted).days
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +308,7 @@ def decide_action(job: Job, location_class: str, profile: Profile) -> str:
     return "apply_plus_email"
 
 
-def score_job(job: Job, profile: Profile) -> ScoreResult:
+def score_job(job: Job, profile: Profile, today: date | None = None) -> ScoreResult:
     excluded = title_exclusion(job, profile)
     if excluded:
         return _reject(job, f"title contains excluded term '{excluded}'")
@@ -312,6 +326,17 @@ def score_job(job: Job, profile: Profile) -> ScoreResult:
         return _reject(
             job,
             f"asks for {years}+ years of experience (max {profile.max_years_required})",
+            family=family.name,
+            track=track,
+            experience_years=years,
+        )
+
+    fresh = profile.freshness
+    age = posting_age_days(job, today)
+    if age is not None and age > int(fresh["max_age_days"]):
+        return _reject(
+            job,
+            f"posting is {age} days old (posted {job.posted_at[:10]}, max {fresh['max_age_days']})",
             family=family.name,
             track=track,
             experience_years=years,
@@ -359,8 +384,14 @@ def score_job(job: Job, profile: Profile) -> ScoreResult:
         size = f"{job.team_size} people" if job.team_size is not None else f"{job.board_size} open roles"
         reasons.append(f"startup ({size}) -> +{startup_points}")
 
+    stale_points = 0
+    if age is not None and age > int(fresh["stale_days"]):
+        stale_points = int(fresh["stale_penalty"])
+        reasons.append(f"stale: posted {age} days ago ({job.posted_at[:10]}) -> -{stale_points}")
+
     weight = profile.family_tier_weights[family.tier]
-    total = (skill_points + location_points + track_points + experience_points + startup_points) * weight
+    total = (skill_points + location_points + track_points + experience_points + startup_points
+             - stale_points) * weight
     score = int(round(max(0.0, min(100.0, total))))
     if weight != 1.0:
         reasons.append(f"{family.tier} family weight x{weight}")

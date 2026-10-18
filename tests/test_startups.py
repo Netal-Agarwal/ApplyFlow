@@ -13,7 +13,7 @@ from applyflow.models import Company, DiscoveredCompany, Job
 from applyflow.pipeline import boards_to_collect, collect, score_all
 from applyflow.scoring import contact_hint, score_job
 from applyflow.store import Store
-from tests.helpers import FakeClient, example_profile, fixture
+from tests.helpers import TODAY, FakeClient, example_profile, fixture
 
 TINY_WORKABLE = "apply.workable.com/api/v1/widget/accounts/tinylabs"
 
@@ -209,7 +209,7 @@ class StartupPipelineTests(unittest.TestCase):
 
         client = FakeClient({TINY_WORKABLE: fixture("workable_tiny.json")})
         collect(store, client, boards_to_collect(store, []), include_hn=False, log=lambda _: None)
-        score_all(store, example_profile())
+        score_all(store, example_profile(), TODAY)
         top = store.ranked()[0]
         self.assertEqual((top["title"], top["team_size"], top["contact_hint"]),
                          ("Backend Developer - Fresher", 12, "founder or CTO"))

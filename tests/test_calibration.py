@@ -3,9 +3,9 @@
 import unittest
 
 from applyflow.collectors import AshbyCollector, LeverCollector
-from applyflow.models import Company
+from applyflow.models import Company, Job
 from applyflow.scoring import score_job, sponsorship_signal
-from tests.helpers import example_profile, fixture
+from tests.helpers import TODAY, example_profile, fixture
 
 
 class AshbyRemoteTests(unittest.TestCase):
@@ -20,24 +20,24 @@ class AshbyRemoteTests(unittest.TestCase):
     def test_hybrid_is_not_remote(self):
         job = self.jobs["h1"]
         self.assertFalse(job.remote)
-        r = score_job(job, self.profile)
+        r = score_job(job, self.profile, TODAY)
         self.assertEqual(r.location_class, "abroad_onsite")
         self.assertEqual(r.action, "apply")           # kept only because it offers relocation
 
     def test_is_remote_flag_alone_is_ignored(self):
         job = self.jobs["h2"]
         self.assertIsNone(job.remote)
-        r = score_job(job, self.profile)
+        r = score_job(job, self.profile, TODAY)
         self.assertEqual(r.tier, "rejected")
         self.assertIn("onsite abroad", r.reasons[0])
 
     def test_remote_location_text_still_counts(self):
         job = self.jobs["h3"]
         self.assertTrue(job.remote)
-        self.assertEqual(score_job(job, self.profile).location_class, "remote_open")
+        self.assertEqual(score_job(job, self.profile, TODAY).location_class, "remote_open")
 
     def test_remote_in_foreign_countries_only_is_restricted(self):
-        r = score_job(self.jobs["h4"], self.profile)     # Cohere: Remote, "Canada | Dubai | London | US"
+        r = score_job(self.jobs["h4"], self.profile, TODAY)     # Cohere: Remote, "Canada | Dubai | London | US"
         self.assertEqual(r.tier, "rejected")
         self.assertIn("restricted to another region", r.reasons[0])
 
@@ -49,7 +49,7 @@ class USOnlyRoleTests(unittest.TestCase):
     def setUpClass(cls):
         cls.profile = example_profile()
         jobs = LeverCollector.parse(fixture("lever_palantir.json"), Company("Palantir", "lever", "palantir"))
-        cls.results = {j.external_id: score_job(j, cls.profile) for j in jobs}
+        cls.results = {j.external_id: score_job(j, cls.profile, TODAY) for j in jobs}
 
     def test_clearance_role_rejected_with_phrase(self):
         r = self.results["gov-1"]
@@ -70,6 +70,41 @@ class USOnlyRoleTests(unittest.TestCase):
         self.assertEqual(sponsorship_signal("Must be a US citizen.")[0], "negative")
         self.assertEqual(sponsorship_signal("Must be eligible for clearance.")[0], "negative")
         self.assertEqual(sponsorship_signal("Relocation assistance; time off for military service")[0], "positive")
+
+
+def job(title="Backend Engineer - New Grad", description="0-1 years experience. Python, FastAPI, AWS, REST APIs.",
+        locations=("Bengaluru",), source="greenhouse", company="Acme", **kw):
+    return Job(source=source, external_id=kw.pop("external_id", "1"), company=company, title=title,
+               url="https://example.com", description=description, locations=list(locations), **kw)
+
+
+class FreshnessTests(unittest.TestCase):
+    """3. Evergreen postings from 2014/2020 are rejected; ones older than ~4 months lose points."""
+
+    def setUp(self):
+        self.profile = example_profile()
+
+    def test_fresh_posting_unaffected(self):
+        fresh = score_job(job(posted_at="2026-10-01T10:00:00Z"), self.profile, TODAY)
+        undated = score_job(job(), self.profile, TODAY)
+        self.assertEqual(fresh.score, undated.score)
+        self.assertFalse(any("stale" in r for r in fresh.reasons))
+
+    def test_stale_posting_penalized(self):
+        fresh = score_job(job(posted_at="2026-10-01"), self.profile, TODAY)
+        stale = score_job(job(posted_at="2026-03-01"), self.profile, TODAY)
+        self.assertTrue(stale.accepted)
+        self.assertEqual(fresh.score - stale.score, 10)
+        self.assertIn("stale: posted 231 days ago (2026-03-01) -> -10", stale.reasons)
+
+    def test_evergreen_posting_rejected(self):
+        r = score_job(job(posted_at="2014-01-23T00:00:00+00:00"), self.profile, TODAY)
+        self.assertEqual(r.tier, "rejected")
+        self.assertIn("posting is 4651 days old", r.reasons[0])
+
+    def test_profile_can_tune_thresholds(self):
+        self.profile.freshness["max_age_days"] = 5000
+        self.assertNotEqual(score_job(job(posted_at="2014-01-23"), self.profile, TODAY).tier, "rejected")
 
 
 if __name__ == "__main__":

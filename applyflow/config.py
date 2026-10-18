@@ -29,6 +29,11 @@ DEFAULT_STARTUP = {
     "founder_contact_max_team_size": 50,
     "small_board_job_count": 15,       # boards this small suggest a small company when headcount is unknown
 }
+DEFAULT_FRESHNESS = {
+    "stale_days": 120,                 # postings older than this lose stale_penalty points
+    "stale_penalty": 10,
+    "max_age_days": 365,               # older than this: rejected as an evergreen/abandoned posting
+}
 DEFAULT_DISCOVERY = {
     "recheck_days": 30,
     "yc": {
@@ -66,6 +71,7 @@ class Profile:
     tiers: dict[str, int]
     large_company_job_count: int
     startup: dict[str, Any] = field(default_factory=dict)
+    freshness: dict[str, Any] = field(default_factory=dict)
     discovery: dict[str, Any] = field(default_factory=dict)
     source_path: Path = field(default=PROFILE_PATH)
 
@@ -123,6 +129,7 @@ def parse_profile(data: dict[str, Any], source_path: Path = PROFILE_PATH) -> Pro
         tiers=tiers,
         large_company_job_count=int(data.get("large_company_job_count", 60)),
         startup={**DEFAULT_STARTUP, **(data.get("startup") or {})},
+        freshness={**DEFAULT_FRESHNESS, **(data.get("freshness") or {})},
         discovery={**DEFAULT_DISCOVERY, **(data.get("discovery") or {})},
         source_path=source_path,
     )

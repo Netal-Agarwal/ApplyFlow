@@ -9,7 +9,7 @@ from applyflow.models import Company, Job
 from applyflow.pipeline import collect, probe, score_all, slug_candidates
 from applyflow.report import write_csv, write_html
 from applyflow.store import Store
-from tests.helpers import FakeClient, default_routes, example_profile
+from tests.helpers import TODAY, FakeClient, default_routes, example_profile
 
 SEEDS = [
     Company("Acme", "greenhouse", "acme"),
@@ -67,7 +67,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual([b for b, _ in summary.boards_failed], ["greenhouse:gone"])
         self.assertEqual(summary.jobs_seen, 8 + 2 + 2 + 3)
 
-        results = score_all(self.store, self.profile)
+        results = score_all(self.store, self.profile, TODAY)
         self.assertEqual(len(results), 15)
         ranked = self.store.ranked()
         self.assertTrue(ranked)
@@ -99,7 +99,7 @@ class PipelineTests(unittest.TestCase):
             source="greenhouse", external_id="9", company="<script>x</script>",
             title="Backend Engineer Intern", url="https://e.com", locations=["Bengaluru"],
             description="New grad. Python FastAPI AWS PostgreSQL REST APIs microservices backend Lambda")])
-        score_all(self.store, self.profile)
+        score_all(self.store, self.profile, TODAY)
         with tempfile.TemporaryDirectory() as tmp:
             page = write_html(self.store.ranked(), Path(tmp) / "r.html").read_text(encoding="utf-8")
         self.assertNotIn("<script>x</script>", page)

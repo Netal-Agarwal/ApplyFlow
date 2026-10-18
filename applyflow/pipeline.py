@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -90,8 +91,8 @@ def boards_to_collect(store: Store, seeds: list[Company]) -> list[Company]:
     return companies
 
 
-def score_all(store: Store, profile: Profile) -> list[ScoreResult]:
-    results = [score_job(job, profile) for job in store.active_jobs()]
+def score_all(store: Store, profile: Profile, today: date | None = None) -> list[ScoreResult]:
+    results = [score_job(job, profile, today) for job in store.active_jobs()]
     store.save_scores(results)
     return results
 

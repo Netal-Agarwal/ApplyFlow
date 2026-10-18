@@ -206,6 +206,14 @@ tiers:
   A: 70
   B: 45
 
+# ---------------------------------------------------------------------------
+# Freshness, from the date the board (re)published the posting.
+# ---------------------------------------------------------------------------
+freshness:
+  stale_days: 120       # older postings lose stale_penalty points
+  stale_penalty: 10
+  max_age_days: 365     # older postings are rejected as evergreen / abandoned
+
 # Boards with more open jobs than this are treated as large companies:
 # apply through their system rather than cold-email.
 large_company_job_count: 60

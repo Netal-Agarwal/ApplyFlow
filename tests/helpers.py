@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 from applyflow.config import PROFILE_EXAMPLE_PATH, load_profile
 from applyflow.http import FetchError
 
 FIXTURES = Path(__file__).parent / "fixtures"
+# Fixtures are dated Sept/Oct 2026; scoring them against a fixed day keeps freshness checks stable.
+TODAY = date(2026, 10, 18)
 
 
 def fixture(name: str):

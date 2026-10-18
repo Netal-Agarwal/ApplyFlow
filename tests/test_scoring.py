@@ -9,7 +9,7 @@ from applyflow.scoring import (
     required_years,
     score_job,
 )
-from tests.helpers import FakeClient, default_routes, example_profile, fixture
+from tests.helpers import TODAY, FakeClient, default_routes, example_profile, fixture
 
 
 def job(title="Software Engineer", description="", locations=("Bengaluru",), source="greenhouse", **kw):
@@ -91,7 +91,7 @@ class FixtureScoringTests(unittest.TestCase):
         lv = LeverCollector.parse(fixture("lever_zeta.json"), Company("Zeta", "lever", "zeta"))
         ab = AshbyCollector.parse(fixture("ashby_nimbus.json"), Company("Nimbus", "ashby", "nimbus"))
         hn = HNWhoIsHiringCollector(FakeClient(default_routes())).fetch()
-        cls.results = {j.id: score_job(j, cls.profile) for j in gh + lv + ab + hn}
+        cls.results = {j.id: score_job(j, cls.profile, TODAY) for j in gh + lv + ab + hn}
 
     def r(self, job_id):
         return self.results[job_id]
