@@ -1,0 +1,35 @@
+[
+ {
+  "login": "kiran-rao-dev",
+  "id": 1001,
+  "node_id": "MDQ6VXNlcjEwMDE=",
+  "avatar_url": "https://avatars.githubusercontent.com/u/1001?v=4",
+  "gravatar_id": "",
+  "url": "https://api.github.com/users/kiran-rao-dev",
+  "html_url": "https://github.com/kiran-rao-dev",
+  "followers_url": "https://api.github.com/users/kiran-rao-dev/followers",
+  "following_url": "https://api.github.com/users/kiran-rao-dev/following{/other_user}",
+  "gists_url": "https://api.github.com/users/kiran-rao-dev/gists{/gist_id}",
+  "starred_url": "https://api.github.com/users/kiran-rao-dev/starred{/owner}{/repo}",
+  "subscriptions_url": "https://api.github.com/users/kiran-rao-dev/subscriptions",
+  "organizations_url": "https://api.github.com/users/kiran-rao-dev/orgs",
+  "repos_url": "https://api.github.com/users/kiran-rao-dev/repos",
+  "events_url": "https://api.github.com/users/kiran-rao-dev/events{/privacy}",
+  "received_events_url": "https://api.github.com/users/kiran-rao-dev/received_events",
+  "type": "User",
+  "user_view_type": "public",
+  "site_admin": false
+ },
+ {
+  "login": "octo-helper",
+  "id": 1002,
+  "node_id": "MDQ6VXNlcjEwMDI=",
+  "avatar_url": "https://avatars.githubusercontent.com/u/1002?v=4",
+  "gravatar_id": "",
+  "url": "https://api.github.com/users/octo-helper",
+  "html_url": "https://github.com/octo-helper",
+  "type": "User",
+  "user_view_type": "public",
+  "site_admin": false
+ }
+]

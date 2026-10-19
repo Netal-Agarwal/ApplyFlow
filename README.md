@@ -61,6 +61,8 @@ companies, about 3-5 minutes), and `run` daily (a minute or two).
 | `python -m applyflow verify-seeds` | Check every seed board still responds |
 | `python -m applyflow discover [--limit 40]` | Find hiring startups in the YC directory and detect their job boards |
 | `python -m applyflow verify-boards` | Check every discovered board belongs to its company; demote mismatches |
+| `python -m applyflow contacts [--company NAME] [--force]` | Find the best person to email at each outreach target; writes `output/contacts.csv` |
+| `python -m applyflow explain-contact "<company>"` | Every contact candidate considered, and why the primary won |
 
 ## How it works
 
@@ -100,6 +102,18 @@ alone doesn't count, since US startups use it for US-remote), teams of 10-300 pe
 leave the report) and unverified boards that now pass are promoted.
 
 Results are stored, so each company is re-checked at most every 30 days.
+
+### Contacts (Phase 2a)
+
+`contacts` picks a person to email at every company with a tier A/B opening (recruiting
+marketplaces excluded - apply through their posting) and at India startups without a readable
+board. In order of trust: emails the posting publishes for applicants, the company's own site
+(a few pages, `robots.txt` respected), the founders on its YC page, its GitHub organisation, and
+finally an email pattern (`first.last@...`) confirmed by a published address - or, failing that,
+a clearly labelled `first@domain` guess. Each contact gets a confidence (verified, strong,
+guessed, fallback) and its source URL; the person is chosen by role fit (founder/CTO at small
+teams, engineering manager or recruiter at bigger ones). Mail servers are never probed and
+nothing is sent. Addresses in `config/do_not_contact.txt` (see the `.example`) are never used.
 
 Deliberately **not** scraped: LinkedIn, Wellfound, Naukri, Instahyre. Their terms
 forbid it and they actively block scrapers.

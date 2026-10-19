@@ -9,12 +9,15 @@
     python -m applyflow probe "Company"  # find a company's ATS board; --add saves it to seeds
     python -m applyflow verify-seeds     # check every seed board still works
     python -m applyflow verify-boards    # check discovered boards belong to their company
+    python -m applyflow contacts         # find who to email at each outreach target (Phase 2a)
+    python -m applyflow explain-contact <company>   # every candidate and why the primary won
     python -m applyflow discover         # find hiring startups (YC directory) and their job boards
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -22,7 +25,7 @@ from applyflow import config
 from applyflow.http import PoliteClient
 from applyflow.discovery import discover_yc, verify_saved_boards
 from applyflow.pipeline import boards_to_collect, collect, probe, score_all
-from applyflow.report import write_companies_csv, write_csv, write_html
+from applyflow.report import write_companies_csv, write_contacts_csv, write_csv, write_html
 from applyflow.scoring import score_job
 from applyflow.store import Store
 
@@ -76,13 +79,17 @@ def cmd_report(args, profile, store) -> int:
     tiers = ("A",) if args.min_tier == "A" else ("A", "B")
     rows = store.ranked(tiers)
     out = Path(args.out)
-    html_path = write_html(rows, out / "opportunities.html", store.stats())
+    from applyflow.discovery import name_key
+    contacts = {name_key(c["company"] or ""): c for c in store.primary_contacts()}
+    html_path = write_html(rows, out / "opportunities.html", store.stats(), contacts)
     csv_path = write_csv(rows, out / "opportunities.csv")
     print(f"{len(rows)} opportunities written to:\n  {html_path}\n  {csv_path}")
     no_board = store.companies_without_board()
     if no_board:
         path = write_companies_csv(no_board, out / "startups_to_email.csv")
         print(f"{len(no_board)} hiring startups without a readable job board (Phase 2 email candidates):\n  {path}")
+    if store.contact_checks():
+        print(f"Contacts: {write_contacts_csv(store, out / 'contacts.csv')}")
     return 0
 
 
@@ -102,6 +109,78 @@ def cmd_discover(args, profile, store) -> int:
     remaining = summary.candidates - summary.checked - summary.skipped_recent
     if remaining > 0:
         print(f"{remaining} companies left to check - run `discover` again to continue.")
+    return 0
+
+
+def cmd_contacts(args, profile, store) -> int:
+    from applyflow.contacts import DoNotContact, GitHubBudget, build_targets, find_contacts
+    from applyflow.discovery import name_key
+    client = _client(profile, args.min_interval)
+    targets = build_targets(store, profile, config.load_seeds(args.seeds), client)
+    if args.company:
+        wanted = name_key(args.company)
+        targets = [t for t in targets if wanted and wanted in name_key(t.company)]
+        if not targets:
+            print(f"No outreach target matching '{args.company}'.")
+            return 1
+    dnc = DoNotContact.load(config.DO_NOT_CONTACT_PATH)
+    github = GitHubBudget()
+    days = int(profile.contacts["recheck_days"])
+    roles = sum(t.kind == "role" for t in targets)
+    print(f"Finding contacts for {len(targets)} targets ({roles} with A/B roles, {len(targets) - roles} general "
+          f"outreach){'' if args.force else f'; companies checked in the last {days} days are skipped'}...")
+    done = skipped = 0
+    for target in targets:
+        if not args.force and store.contacts_checked_recently(target.key, days):
+            skipped += 1
+            continue
+        result = find_contacts(client, target, profile, dnc, github, log=print)
+        store.save_contact_result(result)
+        done += 1
+    counts = store.contact_counts()
+    print(f"\nLooked up {done}, skipped {skipped} checked recently. {github.status()}.")
+    print("Primary contacts by confidence: " + ", ".join(
+        f"{k}={counts.get(k, 0)}" for k in ("verified", "strong", "guessed", "fallback", "none", "no_domain")))
+    print(f"Written: {write_contacts_csv(store, Path(args.out) / 'contacts.csv')}")
+    return 0
+
+
+def cmd_explain_contact(args, profile, store) -> int:
+    checks = store.find_contact_checks(args.company)
+    if not checks:
+        print(f"No contact lookup for '{args.company}'. Run `contacts --company \"{args.company}\"` first.")
+        return 1
+    if len(checks) > 1:
+        exact = [c for c in checks if c["company"].lower() == args.company.lower()]
+        if len(exact) != 1:
+            print("Several companies match; be more specific:")
+            for c in checks:
+                print(f"  {c['company_key']:<36} {c['company']}")
+            return 1
+        checks = exact
+    check = checks[0]
+    details = json.loads(check["details"] or "{}")
+    if check["kind"] == "role":
+        kind = "A/B roles: " + "; ".join(json.loads(check["roles"] or "[]"))
+    else:
+        kind = "general outreach (no readable board)"
+    print(f"{check['company']} ({check['company_key']}) - {kind}")
+    print(f"Domain: {check['domain'] or 'none'} (from {check['domain_source'] or '-'}); "
+          f"team size {check['team_size'] or '?'}; looking for: {check['hint']}; checked {check['checked_at'][:10]}")
+    print("\nSources:")
+    for reason in details.get("reasons", []):
+        print(f"  - {reason}")
+    print("\nCandidates (best first; fit 0 = the role we're looking for):")
+    for i, c in enumerate(details.get("considered", [])):
+        mark = "PRIMARY" if i == 0 else ("backup " if i < 3 else "       ")
+        who = f"{c['name']} - {c['role']}" if c["name"] else c["role"]
+        print(f"  {mark} fit {c['fit']}  {c['confidence']:<8} {c['email']:<38} {who} "
+              f"[{c['source']}] {c['note']}".rstrip())
+        print(f"           {c['source_url']}")
+    for email, why in details.get("excluded", []):
+        print(f"  EXCLUDED {email}: {why}")
+    if details.get("why_primary"):
+        print(f"\nWhy the primary won: {details['why_primary']}.")
     return 0
 
 
@@ -137,6 +216,10 @@ def cmd_stats(args, profile, store) -> int:
         print(f"\nDiscovered companies: {sum(d.values())} "
               f"(board found {d.get('found', 0)}, unverified board {d.get('unverified', 0)}, "
               f"unsupported board {d.get('unsupported', 0)}, none {d.get('none', 0)})")
+    if s.get("contacts"):
+        c = s["contacts"]
+        print(f"\nContacts: {sum(c.values())} companies looked up; primary contact " + ", ".join(
+            f"{k}={c.get(k, 0)}" for k in ("verified", "strong", "guessed", "fallback", "none", "no_domain")))
     if s["failed_boards"]:
         print("\nBoards failing on their latest run:")
         for board, err in s["failed_boards"]:
@@ -245,6 +328,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_probe)
 
     sub.add_parser("verify-seeds", help="check every seed board still responds").set_defaults(func=cmd_verify_seeds)
+    p = sub.add_parser("contacts", help="find the best person to email at each outreach target (Phase 2a)")
+    p.add_argument("--company", help="only targets whose name contains this")
+    p.add_argument("--force", action="store_true", help="look up again even if checked recently")
+    p.add_argument("--out", default=str(config.OUTPUT_DIR))
+    p.set_defaults(func=cmd_contacts)
+
+    p = sub.add_parser("explain-contact", help="every contact candidate for a company, and why the primary won")
+    p.add_argument("company")
+    p.set_defaults(func=cmd_explain_contact)
+
     sub.add_parser("verify-boards", help="check discovered boards belong to their company; demote mismatches"
                    ).set_defaults(func=cmd_verify_boards)
 

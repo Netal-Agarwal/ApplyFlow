@@ -15,6 +15,10 @@ candidate:
   internship_available_from: "2027-01"
   # Optional: identifies you in the HTTP User-Agent so site operators can reach you.
   contact_for_user_agent: ""
+  # Shown in Phase 2 email signatures. Placeholders only here; real values go in profile.yaml.
+  phone: "+91-XXXXXXXXXX"
+  linkedin_url: "https://www.linkedin.com/in/your-handle/"
+  github_url: "https://github.com/your-username"
 
 # ---------------------------------------------------------------------------
 # Tracks: which kinds of openings you want.
@@ -240,6 +244,19 @@ freshness:
 # Boards with more open jobs than this are treated as large companies:
 # apply through their system rather than cold-email.
 large_company_job_count: 60
+
+# Recruiting marketplaces post roles for client companies, so emailing them isn't emailing
+# the hiring company. Their roles stay in the report with action "apply"; they're never contact
+# targets. Postings that say "our client" / "one of our clients" are treated the same way.
+recruiting_marketplaces: ["Weekday"]
+
+# ---------------------------------------------------------------------------
+# Contacts (Phase 2a): who to email at each target company.
+# ---------------------------------------------------------------------------
+contacts:
+  recheck_days: 30          # look a company up again at most this often (unless --force)
+  max_site_pages: 5         # pages read on the company's site besides the homepage
+  github_max_members: 10    # public org members looked up per company (GitHub allows 60 calls/hour)
 
 # ---------------------------------------------------------------------------
 # Startups. Smaller teams hire freshers more readily and a cold email reaches

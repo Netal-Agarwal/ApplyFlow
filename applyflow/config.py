@@ -17,6 +17,7 @@ CONFIG_DIR = ROOT / "config"
 PROFILE_PATH = CONFIG_DIR / "profile.yaml"
 PROFILE_EXAMPLE_PATH = CONFIG_DIR / "profile.example.yaml"
 SEEDS_PATH = CONFIG_DIR / "seeds.yaml"
+DO_NOT_CONTACT_PATH = CONFIG_DIR / "do_not_contact.txt"
 DEFAULT_DB_PATH = ROOT / "data" / "applyflow.db"
 OUTPUT_DIR = ROOT / "output"
 
@@ -33,6 +34,11 @@ DEFAULT_FRESHNESS = {
     "stale_days": 120,                 # postings older than this lose stale_penalty points
     "stale_penalty": 10,
     "max_age_days": 365,               # older than this: rejected as an evergreen/abandoned posting
+}
+DEFAULT_CONTACTS = {
+    "recheck_days": 30,
+    "max_site_pages": 5,
+    "github_max_members": 10,
 }
 DEFAULT_DISCOVERY = {
     "recheck_days": 30,
@@ -75,6 +81,8 @@ class Profile:
     freshness: dict[str, Any] = field(default_factory=dict)
     a_tier_tracks: list[str] = field(default_factory=lambda: ["internship", "new_grad"])
     fresher_skill_floor: int = 25          # min skill points (of 50); 0 turns the floor off
+    recruiting_marketplaces: list[str] = field(default_factory=lambda: ["Weekday"])
+    contacts: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_CONTACTS))
     discovery: dict[str, Any] = field(default_factory=dict)
     source_path: Path = field(default=PROFILE_PATH)
 
@@ -135,6 +143,8 @@ def parse_profile(data: dict[str, Any], source_path: Path = PROFILE_PATH) -> Pro
         freshness={**DEFAULT_FRESHNESS, **(data.get("freshness") or {})},
         a_tier_tracks=list(data.get("a_tier_tracks") or ["internship", "new_grad"]),
         fresher_skill_floor=int(data.get("fresher_skill_floor", 25)),
+        recruiting_marketplaces=[str(x) for x in data.get("recruiting_marketplaces", ["Weekday"]) or []],
+        contacts={**DEFAULT_CONTACTS, **(data.get("contacts") or {})},
         discovery={**DEFAULT_DISCOVERY, **(data.get("discovery") or {})},
         source_path=source_path,
     )

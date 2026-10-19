@@ -348,23 +348,55 @@ def is_startup(job: Job, profile: Profile) -> bool:
     return job.board_size is not None and job.board_size <= int(cfg["small_board_job_count"])
 
 
-def contact_hint(job: Job, profile: Profile) -> str:
-    """Who Phase 2 should look for at this company."""
+MARKETPLACE_HINT = "recruiting marketplace – apply via their posting"
+# "One of our clients is hiring", "Our client, a Series A fintech, ..." - but not boilerplate like
+# "innovation for our clients" (Rubrik) or "protect our client's data".
+_CLIENT_RE = re.compile(r"\bone of our clients\b|\bour client\b(?!s|['’]s)|\bon behalf of (?:our|a|one of our) clients?\b",
+                        re.I)
+
+
+def marketplace_reason(job: Job, profile: Profile) -> str | None:
+    """Why this posting is a recruiting marketplace's (for a client company), or None.
+
+    Contacting the marketplace isn't contacting the hiring company, so these roles are
+    applied to through the posting and never become contact targets.
+    """
+    from applyflow.discovery import name_key
+    key = name_key(job.company)
+    for name in profile.recruiting_marketplaces:
+        if key and key == name_key(name):
+            return f"{job.company} is a recruiting marketplace (profile: recruiting_marketplaces)"
+    m = _CLIENT_RE.search(job.description)
+    if m:
+        return f"posting is for a client company ('{m.group(0)}')"
+    return None
+
+
+def hint_for_size(team_size: int | None, board_size: int | None, profile: Profile) -> str:
+    """Who to contact at a company of this size (see contact_hint)."""
     cfg = profile.startup
-    if job.source == "hn" and job.emails:
-        return "the email in the post"
     small = (
-        job.team_size is not None and job.team_size <= int(cfg["founder_contact_max_team_size"])
-    ) or (job.team_size is None and job.board_size is not None
-          and job.board_size <= int(cfg["small_board_job_count"]))
+        team_size is not None and team_size <= int(cfg["founder_contact_max_team_size"])
+    ) or (team_size is None and board_size is not None and board_size <= int(cfg["small_board_job_count"]))
     if small:
         return "founder or CTO"
-    if job.team_size is not None and job.team_size <= int(cfg["max_team_size"]):
+    if team_size is not None and team_size <= int(cfg["max_team_size"]):
         return "engineering manager or tech lead"
     return "recruiter or engineering manager"
 
 
+def contact_hint(job: Job, profile: Profile) -> str:
+    """Who Phase 2 should look for at this company."""
+    if marketplace_reason(job, profile):
+        return MARKETPLACE_HINT
+    if job.source == "hn" and job.emails:
+        return "the email in the post"
+    return hint_for_size(job.team_size, job.board_size, profile)
+
+
 def decide_action(job: Job, location_class: str, profile: Profile) -> str:
+    if marketplace_reason(job, profile):
+        return "apply"          # the hiring company is the marketplace's client: apply via the posting
     if job.source == "hn":
         return "email" if job.emails else "apply"
     if location_class == "abroad_onsite":
@@ -530,6 +562,10 @@ def score_job(job: Job, profile: Profile, today: date | None = None) -> ScoreRes
         tier = "B"
     else:
         tier = "skip"
+
+    marketplace = marketplace_reason(job, profile)
+    if marketplace:
+        reasons.append(f"{marketplace} -> apply via their posting; never a contact target")
 
     return ScoreResult(
         job_id=job.id,

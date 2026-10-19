@@ -1,5 +1,6 @@
 # --- Personal data: never commit ---
 config/profile.yaml
+config/do_not_contact.txt
 *.db
 *.sqlite
 *.sqlite3

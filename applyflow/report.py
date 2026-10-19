@@ -79,6 +79,42 @@ def write_companies_csv(rows: list[Row], path: Path) -> Path:
     return path
 
 
+CONTACT_FIELDS = [
+    "target_type", "company", "domain", "team_size", "roles", "best_score", "status",
+    "primary_name", "primary_role", "primary_email", "primary_confidence", "primary_source", "primary_source_url",
+    "backup1_name", "backup1_role", "backup1_email", "backup1_confidence",
+    "backup2_name", "backup2_role", "backup2_email", "backup2_confidence", "notes",
+]
+
+
+def write_contacts_csv(store, path: Path) -> Path:
+    """One row per target company: primary contact plus up to two backups (Phase 2a)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=CONTACT_FIELDS)
+        writer.writeheader()
+        for check in store.contact_checks():
+            contacts = store.contacts_for(check["company_key"])
+            details = json.loads(check["details"] or "{}")
+            row = {
+                "target_type": "role" if check["kind"] == "role" else "general_outreach",
+                "company": check["company"], "domain": check["domain"] or "",
+                "team_size": "" if check["team_size"] is None else check["team_size"],
+                "roles": "; ".join(json.loads(check["roles"] or "[]")),
+                "best_score": "" if check["best_score"] is None else check["best_score"],
+                "status": check["status"],
+                "notes": " | ".join(details.get("reasons", [])) if not contacts else "",
+            }
+            for i, c in enumerate(contacts[:3]):
+                prefix = "primary" if i == 0 else f"backup{i}"
+                row.update({f"{prefix}_name": c["name"] or "", f"{prefix}_role": c["role"] or "",
+                            f"{prefix}_email": c["email"], f"{prefix}_confidence": c["confidence"]})
+                if i == 0:
+                    row.update({"primary_source": c["source"], "primary_source_url": c["source_url"] or ""})
+            writer.writerow(row)
+    return path
+
+
 def write_csv(rows: list[Row], path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as fh:
@@ -144,12 +180,17 @@ document.querySelectorAll('.filters select, .filters input').forEach(el => el.ad
 """
 
 
-def write_html(rows: list[Row], path: Path, stats: dict[str, object] | None = None) -> Path:
+def write_html(rows: list[Row], path: Path, stats: dict[str, object] | None = None,
+               contacts: dict[str, Row] | None = None) -> Path:
+    """`contacts` maps a company's name_key to its primary contact (Phase 2a), shown on each opening."""
+    from applyflow.discovery import name_key
     path.parent.mkdir(parents=True, exist_ok=True)
     e = html.escape
+    contacts = contacts or {}
     cards = []
     for row in rows:
         d = _row_dict(row)
+        contact = contacts.get(name_key(d["company"]))
         reasons = json.loads(row["reasons"] or "[]")
         tags = [
             f'<span class="tag action">{e(ACTION_LABELS.get(d["action"], d["action"]))}</span>',
@@ -163,7 +204,11 @@ def write_html(rows: list[Row], path: Path, stats: dict[str, object] | None = No
             tags.append(f'<span class="tag">✉ {e(d["emails"])}</span>')
         if d["team_size"]:
             tags.append(f'<span class="tag">{e(d["team_size"])} people</span>')
-        if d["contact_hint"]:
+        if contact:
+            who = f'{contact["name"]} ({contact["role"]})' if contact["name"] else contact["role"]
+            tags.append(f'<span class="tag action">✉ {e(who)}: {e(contact["email"])} '
+                        f'[{e(contact["confidence"])}]</span>')
+        elif d["contact_hint"]:
             tags.append(f'<span class="tag">contact: {e(d["contact_hint"])}</span>')
         if d["lead_project"]:
             tags.append(f'<span class="tag">lead with: {e(d["lead_project"])}</span>')

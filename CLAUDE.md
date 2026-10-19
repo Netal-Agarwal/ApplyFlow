@@ -21,10 +21,13 @@ decision-maker. Big companies are kept but mostly filter out (senior roles).
 
 1. Discovery & scoring - done (PR #1, #2): collectors, YC discovery, board detection,
    scoring, HTML/CSV report.
-2. Contacts & drafting - next: find the right contact per company (founder/CTO for
-   small teams, EM/recruiter for larger - see `contact_hint`), research the company,
-   draft a personalized email per opening, review/approve screen. An LLM is allowed
-   for research/drafting ("pipeline with agentic parts"), never for sending decisions.
+2. Contacts & drafting:
+   - **2a contacts - done (2026-10-19)**, see "Phase 2a notes" below and `tests/test_contacts.py`.
+   - **2b drafting - next**: research the company, draft a personalized email per opening
+     (and a general "I'd love to work with you" email for `general_outreach` targets), with a
+     review/approve screen. An LLM is allowed for research/drafting ("pipeline with agentic
+     parts"), never for sending decisions. Candidate phone/LinkedIn/GitHub for signatures are
+     in `profile.yaml` (`candidate.*`).
 3. Sending & follow-ups: Gmail API (OAuth) from the user's **personal Gmail**.
    Ramp from ~10-15/day to 30-40/day max. Randomized gaps, business hours in the
    recipient's timezone, no open-tracking pixels, no attachments (resume link only),
@@ -65,8 +68,48 @@ python -m applyflow discover      # YC startups -> detect their boards (40/run)
 python -m applyflow run           # collect + score + report
 python -m applyflow stats         # tiers, top rejection reasons
 python -m applyflow explain "..." # why one job scored what it did
+python -m applyflow verify-boards # re-check discovered boards belong to their company
+python -m applyflow contacts      # who to email at each target (--company NAME, --force)
+python -m applyflow explain-contact "..."  # every contact candidate and why the primary won
 pytest
 ```
+
+## Phase 2a notes (contacts)
+
+- Targets: companies with an A/B opening (never `recruiting_marketplaces`, nor postings saying
+  "one of our clients" / "our client") + India-located discovered companies with no readable board
+  (`general_outreach`). Domain from seeds.yaml `website`, discovery, the HN header URL, or the
+  board's own site link; none -> "no_domain" (retried every run, cheap).
+- Sources in trust order, stopping once a fit-0 verified/strong contact is found: posting emails
+  (verified) -> company site, homepage + 5 likely pages, robots.txt respected (personal email
+  verified, careers@/jobs@ fallback; addresses not tied to a named person and not first.last-shaped
+  are only fallback) -> YC company page founders (`/companies/<slug>` is allowed by YC's robots.txt;
+  only name + title used) -> GitHub org linked from the site (unauthenticated, 60 calls/hour;
+  stops at `x-ratelimit-remaining: 0` until reset) -> pattern: a published first.last etc. confirms
+  a pattern (strong), else first@domain for a named founder/CTO/EM (guessed). No SMTP probing.
+- Ranking: role fit for `contact_hint` first, then confidence (verified > strong > guessed > fallback).
+  Top 3 stored in `contacts`; every candidate + reasons in `contact_checks.details` (`explain-contact`).
+  Re-checked at most every `contacts.recheck_days` (30). `config/do_not_contact.txt` (gitignored).
+- Website "people" are filtered: titles naming another organisation are testimonials/investors
+  ("CTO at Globex", "Founder - Heroku"), possessive titles ("Founder's story") aren't people,
+  and no first@ guess from an initial ("J Richards").
+- Live 2026-10-19: 51 targets (9 role, 42 general outreach). Primary: guessed 42, fallback 1,
+  none 4, no_domain 4, verified 0, strong 0. 32 of the guessed names came from YC pages.
+
+Open points for 2b / later:
+1. **Almost everything is "guessed".** Indian startup sites rarely publish personal emails in HTML
+   (often JS-rendered or behind forms), so no pattern got confirmed live. Drafts to guessed
+   addresses need care (Phase 3 bounce handling); consider preferring a published founders@ inbox
+   over a guessed founder address - today role fit wins (Cardboard: guessed ishan@ above the
+   published founders@cardboard.ai).
+2. **GitHub gave nothing unauthenticated.** GitHub's docs say `/users/{u}` shows a public email only
+   to authenticated requests; live, 0 of the members looked up had an email, and the 60/hour limit
+   was hit on the third pass. Consider a token (free) or dropping the source.
+3. **No domain for 4 role targets** (Stripe, Rubrik, PostHog, SingleStore: seeds without `website`,
+   boards that don't link one). Add `website:` to those seeds.
+4. **Big companies** (Odoo, Supabase, Stripe) don't fit founder/site-scraping; their primary was
+   jira@odoo.com (fallback) or none. Apply via the posting is the realistic route there.
+5. Role targets' `roles` column is captured at lookup time; it refreshes only on a re-check.
 
 ## Calibration backlog
 

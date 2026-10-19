@@ -81,6 +81,37 @@ CREATE TABLE IF NOT EXISTS companies (
 );
 CREATE INDEX IF NOT EXISTS idx_companies_status ON companies(board_status);
 
+CREATE TABLE IF NOT EXISTS contact_checks (
+    company_key   TEXT PRIMARY KEY,            -- discovered key ("yc:slug") or "co:<name>"
+    company       TEXT NOT NULL,
+    kind          TEXT NOT NULL,               -- role | general_outreach
+    domain        TEXT,
+    domain_source TEXT,                        -- seeds.yaml | discovery | HN header | board
+    team_size     INTEGER,
+    roles         TEXT,                        -- JSON list of "Title (score)"
+    best_score    INTEGER,
+    hint          TEXT,                        -- who we looked for
+    status        TEXT NOT NULL,               -- found | none | no_domain
+    details       TEXT,                        -- JSON: every candidate, reasons, why the primary won
+    checked_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS contacts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_key   TEXT NOT NULL,
+    company       TEXT,
+    name          TEXT,
+    role          TEXT,
+    email         TEXT NOT NULL,
+    confidence    TEXT NOT NULL,               -- verified | strong | guessed | fallback
+    source        TEXT,                        -- posting | website | yc | github | pattern
+    source_url    TEXT,
+    found_at      TEXT NOT NULL,
+    is_primary    INTEGER NOT NULL,
+    rank          INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company_key);
+
 CREATE TABLE IF NOT EXISTS collection_runs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     board_key   TEXT NOT NULL,
@@ -319,6 +350,67 @@ class Store:
         return dict(self.conn.execute(
             "SELECT board_status, COUNT(*) FROM companies GROUP BY board_status").fetchall())
 
+    # -- contacts (Phase 2a) ---------------------------------------------------
+
+    def save_contact_result(self, result) -> None:
+        """Replace a company's contacts with this lookup's top 3 (primary first)."""
+        t, now = result.target, _now()
+        with self.conn:
+            self.conn.execute("DELETE FROM contacts WHERE company_key = ?", (t.key,))
+            for rank, c in enumerate(result.contacts):
+                self.conn.execute(
+                    "INSERT INTO contacts (company_key, company, name, role, email, confidence, source, source_url, "
+                    "found_at, is_primary, rank) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (t.key, t.company, c.name, c.role, c.email, c.confidence, c.source, c.source_url, now,
+                     int(rank == 0), rank))
+            from applyflow.contacts import result_to_json
+            self.conn.execute(
+                """
+                INSERT INTO contact_checks (company_key, company, kind, domain, domain_source, team_size, roles,
+                                            best_score, hint, status, details, checked_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(company_key) DO UPDATE SET
+                    company=excluded.company, kind=excluded.kind, domain=excluded.domain,
+                    domain_source=excluded.domain_source, team_size=excluded.team_size, roles=excluded.roles,
+                    best_score=excluded.best_score, hint=excluded.hint, status=excluded.status,
+                    details=excluded.details, checked_at=excluded.checked_at
+                """,
+                (t.key, t.company, t.kind, t.domain, t.domain_source, t.team_size, json.dumps(t.roles),
+                 t.best_score, t.hint, result.status, json.dumps(result_to_json(result)), now))
+
+    def contacts_checked_recently(self, company_key: str, days: int) -> bool:
+        """Looked up within `days` (a missing domain doesn't count: that's cheap to retry)."""
+        row = self.conn.execute("SELECT checked_at, status FROM contact_checks WHERE company_key = ?",
+                                (company_key,)).fetchone()
+        if row is None or row["status"] == "no_domain":
+            return False
+        return datetime.now(timezone.utc) - datetime.fromisoformat(row["checked_at"]) < timedelta(days=days)
+
+    def contact_checks(self) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM contact_checks ORDER BY CASE kind WHEN 'role' THEN 0 ELSE 1 END, "
+            "COALESCE(best_score, -1) DESC, company").fetchall()
+
+    def contacts_for(self, company_key: str) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM contacts WHERE company_key = ? ORDER BY rank",
+                                 (company_key,)).fetchall()
+
+    def find_contact_checks(self, needle: str) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM contact_checks WHERE company LIKE ? OR company_key LIKE ? "
+                                 "ORDER BY company", (f"%{needle}%", f"%{needle}%")).fetchall()
+
+    def primary_contacts(self) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM contacts WHERE is_primary = 1").fetchall()
+
+    def contact_counts(self) -> dict[str, int]:
+        """Companies looked up, by their primary contact's confidence (or none / no_domain)."""
+        counts: dict[str, int] = {}
+        for row in self.conn.execute(
+                "SELECT COALESCE(c.confidence, k.status) FROM contact_checks k "
+                "LEFT JOIN contacts c ON c.company_key = k.company_key AND c.is_primary = 1"):
+            counts[row[0]] = counts.get(row[0], 0) + 1
+        return counts
+
     def _reject_reason_counts(self, limit: int = 8) -> list[tuple[str, int]]:
         """Group rejection reasons into broad categories ("asks for N+ years" -> one bucket)."""
         counts: dict[str, int] = {}
@@ -345,6 +437,7 @@ class Store:
                 "WHERE j.active = 1 GROUP BY s.tier").fetchall()),
             "top_reject_reasons": self._reject_reason_counts(),
             "discovered": self.discovery_counts(),
+            "contacts": self.contact_counts(),
             "failed_boards": [
                 (r[0], r[1]) for r in c.execute(
                     "SELECT board_key, error FROM collection_runs r WHERE ok = 0 AND started_at = "

@@ -18,10 +18,11 @@ import requests
 
 
 class FetchError(RuntimeError):
-    def __init__(self, url: str, message: str, status: int | None = None):
+    def __init__(self, url: str, message: str, status: int | None = None, headers: Any = None):
         super().__init__(f"{url}: {message}")
         self.url = url
         self.status = status
+        self.headers = headers or {}
 
 
 class PoliteClient:
@@ -78,7 +79,20 @@ class PoliteClient:
                 delay = float(retry_after) if retry_after.isdigit() else 2 ** attempt
                 self._sleep(min(delay, 60))
                 continue
-            raise FetchError(url, f"HTTP {status}", status)
+            raise FetchError(url, f"HTTP {status}", status, response.headers)
+
+    def get_api(self, url: str, params: dict[str, Any] | None = None,
+                headers: dict[str, str] | None = None) -> tuple[Any, Any]:
+        """One attempt at a JSON API that reports its own rate limit: returns (data, headers).
+
+        No automatic retry: APIs like GitHub's ask clients not to retry before the reset time,
+        so the caller reads the headers (or FetchError.headers) and decides.
+        """
+        response = self._get(url, params, headers, max_retries=0)
+        try:
+            return response.json(), response.headers
+        except ValueError as exc:
+            raise FetchError(url, "response was not JSON", response.status_code) from exc
 
     def get_json(self, url: str, params: dict[str, Any] | None = None) -> Any:
         response = self._get(url, params)

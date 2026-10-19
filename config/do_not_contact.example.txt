@@ -1,0 +1,9 @@
+# Do-not-contact list. Copy to config/do_not_contact.txt (gitignored) and add one entry per line:
+#   someone@company.com   never contact this address
+#   @company.com          never contact anyone at this domain (or its subdomains)
+# Blank lines and lines starting with # are ignored. Matching contacts are excluded from
+# every contact list and draft, and the exclusion is noted in `explain-contact`.
+#
+# Examples (placeholders):
+# jane.doe@example.com
+# @example.org
