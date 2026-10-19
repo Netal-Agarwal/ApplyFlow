@@ -12,6 +12,14 @@
     python -m applyflow contacts         # find who to email at each outreach target (Phase 2a)
     python -m applyflow explain-contact <company>   # every candidate and why the primary won
     python -m applyflow discover         # find hiring startups (YC directory) and their job boards
+    python -m applyflow draft-pack       # Phase 2b: company context, template drafts, drafting packets
+    python -m applyflow import-drafts    # load output/drafts/written/<id>.md (validated)
+    python -m applyflow queue --date D   # pick a day's batch (tier 1, 2, then gated tier 3)
+    python -m applyflow mark-sent <id>   # record a sent email (or --batch D for a whole day)
+    python -m applyflow mark-bounced <id>   # record a bounce; the next address is suggested
+    python -m applyflow add-target "Co" --website co.com   # a target of your own
+
+ApplyFlow never sends email: you send from Gmail and record it here.
 """
 
 from __future__ import annotations
@@ -75,15 +83,35 @@ def cmd_score(args, profile, store) -> int:
     return 0
 
 
+def _dnc():
+    from applyflow.contacts import DoNotContact
+    return DoNotContact.load(config.DO_NOT_CONTACT_PATH)
+
+
 def cmd_report(args, profile, store) -> int:
+    from applyflow.drafting import load_facts
+    from applyflow.outreach import parse_day, refresh_drafts, stored_or_preview_batch
+    from applyflow.report import outreach_sections, write_outbox_csv
     tiers = ("A",) if args.min_tier == "A" else ("A", "B")
     rows = store.ranked(tiers)
     out = Path(args.out)
     from applyflow.discovery import name_key
     contacts = {name_key(c["company"] or ""): c for c in store.primary_contacts()}
-    html_path = write_html(rows, out / "opportunities.html", store.stats(), contacts)
+    items = refresh_drafts(store, profile, _dnc())
+    outreach = ""
+    if items:
+        day = parse_day(getattr(args, "date", None))
+        batch, stored, gate = stored_or_preview_batch(store, profile, items, day)
+        outreach = outreach_sections(items, batch, day.isoformat(), stored, load_facts(profile).listing(),
+                                     f"Tier 3 (guessed addresses) {gate.reason}.")
+        outbox = write_outbox_csv(items, {it.target_id for it in batch}, out / "outbox.csv")
+    html_path = write_html(rows, out / "opportunities.html", store.stats(), contacts, outreach)
     csv_path = write_csv(rows, out / "opportunities.csv")
     print(f"{len(rows)} opportunities written to:\n  {html_path}\n  {csv_path}")
+    if items:
+        written = sum(it.draft.source == "claude" for it in items)
+        print(f"{len(items)} outreach drafts ({written} Claude-written, {len(items) - written} template); "
+              f"today's batch: {len(batch)}{'' if stored else ' (preview)'}:\n  {outbox}")
     no_board = store.companies_without_board()
     if no_board:
         path = write_companies_csv(no_board, out / "startups_to_email.csv")
@@ -131,9 +159,14 @@ def cmd_contacts(args, profile, store) -> int:
     print(f"Finding contacts for {len(targets)} targets ({roles} with A/B roles, {len(targets) - roles} general "
           f"outreach){'' if args.force else f'; companies checked in the last {days} days are skipped'}...")
     done = skipped = 0
+    from applyflow.contacts import manual_result
     for target in targets:
         if not args.force and store.contacts_checked_recently(target.key, days):
             skipped += 1
+            continue
+        manual = store.get_manual_target(target.key) if target.kind == "manual" else None
+        if manual is not None and manual["email"]:
+            store.save_contact_result(manual_result(target, manual))     # given by hand: no lookup
             continue
         result = find_contacts(client, target, profile, dnc, github, log=print, mx=mx)
         store.save_contact_result(result)
@@ -163,6 +196,8 @@ def cmd_explain_contact(args, profile, store) -> int:
     details = json.loads(check["details"] or "{}")
     if check["kind"] == "role":
         kind = "A/B roles: " + "; ".join(json.loads(check["roles"] or "[]"))
+    elif check["kind"] == "manual":
+        kind = "added by hand (add-target)"
     else:
         kind = "general outreach (no readable board)"
     print(f"{check['company']} ({check['company_key']}) - {kind}")
@@ -185,6 +220,126 @@ def cmd_explain_contact(args, profile, store) -> int:
         print(f"  EXCLUDED {email}: {why}")
     if details.get("why_primary"):
         print(f"\nWhy the primary won: {details['why_primary']}.")
+    return 0
+
+
+def cmd_draft_pack(args, profile, store) -> int:
+    from applyflow.outreach import build_items, ensure_context, refresh_drafts, write_packets
+    items = build_items(store, profile, _dnc())
+    if not items:
+        print("No outreach targets yet. Run `contacts` first.")
+        return 1
+    if not args.no_fetch:
+        missing = sum(store.get_context(it.company_key) is None and bool(it.inputs.website) for it in items)
+        print(f"Fetching homepage context for {missing} target(s) without it (robots.txt respected)...")
+        ensure_context(store, _client(profile, args.min_interval), items, log=print, force=args.refetch)
+    items = refresh_drafts(store, profile, _dnc())
+    out = Path(args.out)
+    paths = write_packets(items, profile, out)
+    bad = [it for it in items if it.draft.template_failures]
+    written = sum(it.draft.source == "claude" for it in items)
+    print(f"\n{len(paths)} packets in {out / 'packets'} (STYLE_GUIDE.md, INDEX.md alongside).")
+    print(f"Drafts: {written} Claude-written, {len(items) - written} template; "
+          f"{sum(it.status == 'ready' for it in items)} targets ready to send.")
+    for it in bad:
+        print(f"  template check failed for {it.target_id}: {'; '.join(it.draft.template_failures)}")
+    print(f"Write drafts to {out / 'written'}\\<id>.md, then run `import-drafts`.")
+    return 0
+
+
+def cmd_import_drafts(args, profile, store) -> int:
+    from applyflow.outreach import import_written
+    folder = Path(args.dir)
+    if not folder.exists():
+        print(f"No folder {folder}.")
+        return 1
+    results = import_written(store, profile, folder, _dnc())
+    ok = [r for r in results if r.ok]
+    print(f"Imported {len(results)} file(s): {len(ok)} passed, {len(results) - len(ok)} stay on the template.")
+    for r in results:
+        if not r.ok:
+            print(f"  {r.target_id}: " + "; ".join(r.failures))
+    return 0 if len(ok) == len(results) else 1
+
+
+def cmd_queue(args, profile, store) -> int:
+    from applyflow.outreach import OutreachError, make_queue, parse_day
+    try:
+        day = parse_day(args.date)
+    except OutreachError as exc:
+        print(f"error: {exc}")
+        return 2
+    batch = make_queue(store, profile, day, args.size, _dnc())
+    print(f"Batch for {batch.day}: {len(batch.items)} email(s)")
+    for i, it in enumerate(batch.items, start=1):
+        a = it.address
+        who = f"{a.name} ({a.role})" if a and a.name else (a.role if a else "")
+        state = f"  [sent {it.sent_date}]" if it.status == "sent" else ""
+        print(f"  {i:>2}. T{it.send_tier} {it.company:<24} {(it.sent_email or a.email):<34} {who}{state}")
+    tier3 = sum(it.send_tier == 3 for it in batch.items)
+    print(f"Tier 3 (guessed addresses) {batch.gate.reason}.")
+    print(f"  {tier3} in this batch, {batch.tier3_held} held back.")
+    if batch.skipped_same_company:
+        print(f"{batch.skipped_same_company} skipped: another target for the same company is queued.")
+    print("Send them from the report (Open in Gmail), then `mark-sent --batch "
+          f"{batch.day}` or `mark-sent <id>` for each.")
+    return 0
+
+
+def cmd_mark_sent(args, profile, store) -> int:
+    from applyflow.outreach import OutreachError, mark_batch_sent, mark_sent, parse_day
+    try:
+        if args.batch:
+            marked = mark_batch_sent(store, profile, parse_day(args.batch), _dnc())
+            print(f"Marked {len(marked)} sent from the {args.batch} batch:")
+            for m in marked:
+                print(f"  {m}")
+            return 0
+        if not args.target:
+            print("error: give a target id, or --batch YYYY-MM-DD")
+            return 2
+        it = mark_sent(store, profile, args.target, parse_day(args.date), _dnc())
+    except OutreachError as exc:
+        print(f"error: {exc}")
+        return 1
+    print(f"Marked sent: {it.target_id} -> {it.address.email}")
+    return 0
+
+
+def cmd_mark_bounced(args, profile, store) -> int:
+    from applyflow.outreach import OutreachError, mark_bounced, parse_day
+    try:
+        it = mark_bounced(store, profile, args.target, parse_day(args.date), _dnc())
+    except OutreachError as exc:
+        print(f"error: {exc}")
+        return 1
+    print(f"Bounce recorded for {it.target_id} ({it.bounced[-1]}).")
+    if it.address:
+        print(f"Next address: {it.address.label()} - send tier {it.send_tier}. "
+              f"The draft greets '{it.inputs.greeting}'" + (" (template: the written draft no longer fits)"
+                                                            if it.draft.failures else "") + ".")
+    else:
+        print("No more addresses for this company.")
+    return 0
+
+
+def cmd_add_target(args, profile, store) -> int:
+    from applyflow.discovery import site_domain
+    from applyflow.outreach import OutreachError, add_target
+    if not site_domain(args.website):
+        print(f"error: '{args.website}' isn't a website domain")
+        return 2
+    try:
+        it = add_target(store, profile, _client(profile, args.min_interval), args.company, args.website,
+                        note=args.note or "", email=args.email or "", person=args.person or "",
+                        role=args.role or "", dnc=_dnc(), log=print, out_dir=Path(args.out) / "drafts")
+    except OutreachError as exc:
+        print(f"error: {exc}")
+        return 1
+    a = it.address
+    print(f"Added {it.company} ({it.target_id}): " + (f"{a.label()}, send tier {it.send_tier}" if a else
+                                                      f"no contact found ({it.status})"))
+    print(f"Template draft stored; packet: {Path(args.out) / 'drafts' / 'packets' / (it.target_id + '.md')}")
     return 0
 
 
@@ -303,6 +458,7 @@ def build_parser() -> argparse.ArgumentParser:
     def add_report_opts(p):
         p.add_argument("--out", default=str(config.OUTPUT_DIR))
         p.add_argument("--min-tier", choices=["A", "B"], default="B")
+        p.add_argument("--date", help="day whose batch the report shows (YYYY-MM-DD, default today)")
 
     p = sub.add_parser("collect", help="fetch openings from every source")
     add_collect_opts(p)
@@ -344,6 +500,42 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("verify-boards", help="check discovered boards belong to their company; demote mismatches"
                    ).set_defaults(func=cmd_verify_boards)
+
+    p = sub.add_parser("draft-pack", help="fetch company context, refresh template drafts, write drafting packets")
+    p.add_argument("--out", default=str(config.DRAFTS_DIR))
+    p.add_argument("--no-fetch", action="store_true", help="don't fetch missing homepage context")
+    p.add_argument("--refetch", action="store_true", help="fetch every homepage again")
+    p.set_defaults(func=cmd_draft_pack)
+
+    p = sub.add_parser("import-drafts", help="load written drafts (output/drafts/written/<id>.md), validated")
+    p.add_argument("--dir", default=str(config.DRAFTS_DIR / "written"))
+    p.set_defaults(func=cmd_import_drafts)
+
+    p = sub.add_parser("queue", help="pick a day's send batch (nothing is sent)")
+    p.add_argument("--date", help="YYYY-MM-DD (default today)")
+    p.add_argument("--size", type=int, help="batch size (default outreach.daily_batch)")
+    p.set_defaults(func=cmd_queue)
+
+    p = sub.add_parser("mark-sent", help="record an email you sent")
+    p.add_argument("target", nargs="?", help="target id, e.g. yc-clickpe")
+    p.add_argument("--batch", help="mark a whole day's queue (YYYY-MM-DD) as sent")
+    p.add_argument("--date", help="send date, YYYY-MM-DD (default today)")
+    p.set_defaults(func=cmd_mark_sent)
+
+    p = sub.add_parser("mark-bounced", help="record a bounce; the next address is suggested")
+    p.add_argument("target")
+    p.add_argument("--date", help="YYYY-MM-DD (default today)")
+    p.set_defaults(func=cmd_mark_bounced)
+
+    p = sub.add_parser("add-target", help="add a company of your own as an outreach target")
+    p.add_argument("company")
+    p.add_argument("--website", required=True, help="the company's domain, e.g. acme.com")
+    p.add_argument("--note", help="why it's a target (shown in its packet)")
+    p.add_argument("--email", help="address to use (skips the contact search)")
+    p.add_argument("--name", dest="person", help="the person's name")
+    p.add_argument("--role", help="the person's role, e.g. CTO")
+    p.add_argument("--out", default=str(config.OUTPUT_DIR))
+    p.set_defaults(func=cmd_add_target)
 
     p = sub.add_parser("discover", help="find hiring startups and their job boards automatically")
     p.add_argument("--limit", type=int, default=40, help="companies to check this run (default 40)")

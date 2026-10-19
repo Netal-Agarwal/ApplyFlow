@@ -18,6 +18,7 @@ PROFILE_PATH = CONFIG_DIR / "profile.yaml"
 PROFILE_EXAMPLE_PATH = CONFIG_DIR / "profile.example.yaml"
 SEEDS_PATH = CONFIG_DIR / "seeds.yaml"
 DO_NOT_CONTACT_PATH = CONFIG_DIR / "do_not_contact.txt"
+DRAFTS_DIR = ROOT / "output" / "drafts"
 DEFAULT_DB_PATH = ROOT / "data" / "applyflow.db"
 OUTPUT_DIR = ROOT / "output"
 
@@ -41,6 +42,18 @@ DEFAULT_CONTACTS = {
     "github_max_members": 10,
     "apply_only_team_size": 300,     # bigger companies: apply via the posting, no contact search
     "mx_cache_days": 30,
+}
+DEFAULT_OUTREACH = {
+    "daily_batch": 20,                 # emails `queue` picks per day
+    "tier3": {                         # guessed addresses (send tier 3)
+        "unlock_after_days": 2,        # calendar days after the first mark-sent, with zero bounces so far
+        "start_per_day": 5,            # tier-3 emails per day once unlocked (inside daily_batch)
+        "ramp_after_days": 3,          # days after the first tier-3 send before the higher limit
+        "ramp_per_day": 10,            # ... if the bounce rate stays under max_bounce_rate
+        "max_bounce_rate": 0.05,       # at or above this (bounces / sends), tier 3 pauses
+    },
+    "min_words": 120,                  # draft length between the greeting and the sign-off
+    "max_words": 160,
 }
 DEFAULT_DISCOVERY = {
     "recheck_days": 30,
@@ -86,6 +99,7 @@ class Profile:
     recruiting_marketplaces: list[str] = field(default_factory=lambda: ["Weekday"])
     contacts: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_CONTACTS))
     discovery: dict[str, Any] = field(default_factory=dict)
+    outreach: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_OUTREACH))
     source_path: Path = field(default=PROFILE_PATH)
 
     @property
@@ -148,8 +162,15 @@ def parse_profile(data: dict[str, Any], source_path: Path = PROFILE_PATH) -> Pro
         recruiting_marketplaces=[str(x) for x in data.get("recruiting_marketplaces", ["Weekday"]) or []],
         contacts={**DEFAULT_CONTACTS, **(data.get("contacts") or {})},
         discovery={**DEFAULT_DISCOVERY, **(data.get("discovery") or {})},
+        outreach=_outreach(data.get("outreach") or {}),
         source_path=source_path,
     )
+
+
+def _outreach(raw: dict[str, Any]) -> dict[str, Any]:
+    out = {**DEFAULT_OUTREACH, **raw}
+    out["tier3"] = {**DEFAULT_OUTREACH["tier3"], **(raw.get("tier3") or {})}
+    return out
 
 
 def load_profile(path: Path | None = None) -> Profile:

@@ -428,7 +428,7 @@ class StorageTests(unittest.TestCase):
 class CandidateDetailsTests(unittest.TestCase):
     def test_example_profile_has_placeholders_only(self):
         candidate = example_profile().candidate
-        self.assertEqual(candidate["phone"], "+91-XXXXXXXXXX")
+        self.assertEqual(candidate["phone"], "+91 90000 00000")
         self.assertIn("your-handle", candidate["linkedin_url"])
         self.assertIn("your-username", candidate["github_url"])
 

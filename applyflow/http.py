@@ -125,4 +125,18 @@ class PoliteClient:
         if not self.allowed_by_robots(url):
             raise FetchError(url, "disallowed by robots.txt")
         response = self._get(url, None, {"Accept": "text/html"}, max_retries=0)
-        return response.text[:2_000_000]
+        return decode_page(response)[:2_000_000]
+
+
+def decode_page(response: Any) -> str:
+    """The page's text. Without a charset in Content-Type, requests assumes ISO-8859-1, which turns
+    UTF-8 pages into mojibake ("PrimeVault â ..."): try UTF-8 first in that case."""
+    content_type = str((response.headers or {}).get("Content-Type", "")).lower()
+    raw = getattr(response, "content", None)
+    if "charset" in content_type or not isinstance(raw, bytes):
+        return response.text
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode(getattr(response, "apparent_encoding", None) or "latin-1", errors="replace")
+

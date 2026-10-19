@@ -1,4 +1,4 @@
-"""Export ranked opportunities as CSV and as a self-contained HTML page."""
+"""Export ranked opportunities (and Phase 2b outreach drafts) as CSV and as a self-contained HTML page."""
 
 from __future__ import annotations
 
@@ -134,6 +134,126 @@ def write_csv(rows: list[Row], path: Path) -> Path:
     return path
 
 
+OUTBOX_FIELDS = ["priority", "target_id", "company", "type", "why", "status", "send_tier", "in_batch", "to",
+                 "contact_name", "contact_role", "confidence", "backups", "subject", "body", "resume_action",
+                 "draft_source", "validation_notes", "sent_date", "gmail_url"]
+
+
+def write_outbox_csv(items, batch_ids: set[str], path: Path) -> Path:
+    """Every outreach target's current draft, ready to send or not (Phase 2b)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=OUTBOX_FIELDS)
+        writer.writeheader()
+        for it in items:
+            a, d = it.address, it.draft
+            writer.writerow({
+                "priority": it.priority, "target_id": it.target_id, "company": it.company, "type": it.kind,
+                "why": it.why, "status": it.status, "send_tier": it.send_tier or "",
+                "in_batch": "yes" if it.target_id in batch_ids else "",
+                "to": it.sent_email or (a.email if a else ""), "contact_name": a.name if a else "",
+                "contact_role": a.role if a else "", "confidence": a.confidence if a else "",
+                "backups": "; ".join(b.email for b in it.backups), "subject": d.subject, "body": d.body,
+                "resume_action": d.resume_action, "draft_source": d.source,
+                "validation_notes": " | ".join(d.failures or d.template_failures),
+                "sent_date": it.sent_date, "gmail_url": it.gmail,
+            })
+    return path
+
+
+_STATUS_LABELS = {"ready": "ready", "sent": "sent", "exhausted": "all addresses bounced",
+                  "do_not_contact": "do not contact", "no_contact": "no contact found",
+                  "apply_only": "apply via posting", "no_domain": "no domain"}
+
+
+def _outreach_card(it, in_batch: bool) -> str:
+    e = html.escape
+    a, d = it.address, it.draft
+    tier = f"T{it.send_tier}" if it.send_tier else "–"
+    to = it.sent_email or (a.email if a else "")
+    tags = [f'<span class="tag action">{e(_STATUS_LABELS.get(it.status, it.status))}'
+            + (f" {e(it.sent_date)}" if it.sent_date else "") + "</span>",
+            f'<span class="tag">{e(it.kind.replace("_", " "))}</span>']
+    if in_batch:
+        tags.append('<span class="tag action">today\'s batch</span>')
+    contact = ""
+    if a:
+        who = f"{a.name} ({a.role})" if a.name else a.role
+        mx = ", MX unchecked" if a.mx == "unchecked" else ""
+        contact = (f'<div class="line"><b>To:</b> {e(to)} · {e(who)} '
+                   f'<span class="tag">{e(a.confidence.replace("_", " "))}{mx}</span></div>')
+    if it.backups:
+        contact += ('<div class="line muted"><b>Backups:</b> '
+                    + e("; ".join(b.label() for b in it.backups[:4])) + "</div>")
+    if it.bounced:
+        contact += f'<div class="line muted"><b>Bounced:</b> {e(", ".join(it.bounced))}</div>'
+    links = " · ".join(f'<a href="{e(url)}" target="_blank" rel="noopener">{e(label)}</a>'
+                       for label, url in it.manual_links)
+    notes = d.failures or d.template_failures
+    source = "Claude-written" if d.source == "claude" else "template"
+    note_html = ""
+    if d.failures:
+        note_html = ('<div class="line warn">Written draft rejected, showing the template: '
+                     + e("; ".join(d.failures)) + "</div>")
+    elif d.template_failures:
+        note_html = '<div class="line warn">Template check: ' + e("; ".join(d.template_failures)) + "</div>"
+    buttons = ""
+    if to:
+        buttons = (f'<button data-text="{e(to)}">Copy address</button>'
+                   f'<button data-text="{e(d.subject)}">Copy subject</button>'
+                   f'<button data-text="{e(d.body)}">Copy body</button>'
+                   f'<a class="btn" href="{e(it.gmail)}" target="_blank" rel="noopener">Open in Gmail</a>')
+    return (
+        f'<article class="target" data-tier="{e(str(it.send_tier or ""))}" data-kind="{e(it.kind)}" '
+        f'data-status="{e(it.status)}">'
+        f'<div class="top"><span class="score">{e(tier)}</span><span class="title">{e(it.company)}</span>'
+        f'<span class="company">#{it.priority} · {e(it.why)}</span></div>'
+        f'<div class="tags">{"".join(tags)}</div>{contact}'
+        + (f'<div class="line muted"><b>Check:</b> {links}</div>' if links else "")
+        + f'<div class="line"><b>Subject:</b> {e(d.subject)}</div>'
+        f'<pre class="mail">{e(d.body)}</pre>'
+        f'<div class="line"><b>Resume:</b> {e(d.resume_action)} <span class="muted">({e(d.resume_reason)})</span>'
+        f' · <b>Draft:</b> {e(source)}' + (f' · <b>Project:</b> {e(d.project)}' if d.project else "") + "</div>"
+        + note_html + (f'<div class="actions">{buttons}</div>' if buttons else "") + "</article>"
+    )
+
+
+def outreach_sections(items, batch: list, batch_day: str, batch_stored: bool, facts_lines: list[str],
+                      tier3_note: str = "") -> str:
+    """Today's batch and every outreach target (Phase 2b), as HTML."""
+    e = html.escape
+    batch_ids = {it.target_id for it in batch}
+    counts: dict[str, int] = {}
+    for it in items:
+        counts[it.status] = counts.get(it.status, 0) + 1
+    written = sum(it.draft.source == "claude" for it in items)
+    origin = "from `queue`" if batch_stored else "preview - run `queue` to fix it"
+    batch_html = "".join(_outreach_card(it, True) for it in batch) or \
+        '<p class="empty">Nothing to send today.</p>'
+    all_html = "".join(_outreach_card(it, it.target_id in batch_ids) for it in items)
+    stats = [("Targets", len(items)), ("Ready", counts.get("ready", 0)), ("Sent", counts.get("sent", 0)),
+             ("Claude-written", written), ("Today", len(batch))]
+    return (
+        f'<h1>Today\'s batch · {e(batch_day)}</h1>'
+        f'<p class="sub">{len(batch)} emails ({e(origin)}). Nothing is sent by ApplyFlow: open each in Gmail, '
+        f'attach the resume where it says <b>attach</b>, send, then <code>mark-sent</code>.'
+        + (f'<br>{e(tier3_note)}' if tier3_note else "") + '</p>'
+        f'<div class="stats">{"".join(f"<div class=stat><b>{v}</b><span>{e(k)}</span></div>" for k, v in stats)}</div>'
+        f'{batch_html}'
+        f'<details class="facts"><summary>Candidate facts the drafts may use</summary><ul>'
+        + "".join(f"<li>{e(f)}</li>" for f in facts_lines) + "</ul></details>"
+        f'<h1 style="margin-top:32px">All outreach targets</h1>'
+        f'<div class="filters"><select id="o-tier"><option value="">All send tiers</option><option value="1">Tier 1</option>'
+        f'<option value="2">Tier 2</option><option value="3">Tier 3</option></select>'
+        f'<select id="o-kind"><option value="">All types</option><option value="role">Role</option>'
+        f'<option value="general_outreach">General outreach</option><option value="manual">Manual</option></select>'
+        f'<select id="o-status"><option value="">All statuses</option>'
+        + "".join(f'<option value="{k}">{e(v)}</option>' for k, v in _STATUS_LABELS.items())
+        + f'</select><input id="o-text" type="search" placeholder="Search company, contact, draft…"></div>'
+        f'<div id="targets">{all_html}</div><h1 style="margin-top:32px">Ranked opportunities</h1>'
+    )
+
+
 _CSS = """
 :root { --bg:#f7f7f5; --card:#fff; --ink:#1d1d1f; --muted:#6b6b70; --line:#e4e4e0;
         --a:#1f7a4d; --b:#8a6d1a; --accent:#2b59c3; }
@@ -168,6 +288,16 @@ h1 { font-size: 26px; margin: 0 0 4px; }
 details { margin-top:6px; color: var(--muted); font-size: 13px; }
 details ul { margin: 6px 0 0 18px; padding: 0; }
 .empty { color: var(--muted); padding: 24px 0; }
+.target { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px;
+          margin-bottom:12px; }
+.line { margin-top:6px; font-size:14px; overflow-wrap:anywhere; }
+.muted { color: var(--muted); } .warn { color: var(--b); }
+pre.mail { white-space: pre-wrap; overflow-wrap:anywhere; background:var(--bg); border:1px solid var(--line);
+           border-radius:8px; padding:10px 12px; font:13px/1.5 ui-monospace, Consolas, monospace; margin:8px 0; }
+.actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+.actions button, .actions .btn { background:var(--card); color:var(--accent); border:1px solid var(--accent);
+           border-radius:8px; padding:5px 10px; font:inherit; font-size:13px; cursor:pointer; text-decoration:none; }
+.facts { margin: 12px 0 0; }
 """
 
 _JS = """
@@ -186,12 +316,34 @@ function apply() {
   q('#count').textContent = shown;
 }
 document.querySelectorAll('.filters select, .filters input').forEach(el => el.addEventListener('input', apply));
+function applyTargets() {
+  const t = q('#o-tier'), k = q('#o-kind'), st = q('#o-status'), x = q('#o-text');
+  if (!t) return;
+  const text = x.value.toLowerCase();
+  document.querySelectorAll('#targets .target').forEach(el => {
+    const ok = (!t.value || el.dataset.tier === t.value) && (!k.value || el.dataset.kind === k.value)
+      && (!st.value || el.dataset.status === st.value) && (!text || el.textContent.toLowerCase().includes(text));
+    el.style.display = ok ? '' : 'none';
+  });
+}
+['#o-tier', '#o-kind', '#o-status', '#o-text'].forEach(s => { const el = q(s); if (el) el.addEventListener('input', applyTargets); });
+function copyText(text, button) {
+  const done = () => { const old = button.textContent; button.textContent = 'Copied'; setTimeout(() => button.textContent = old, 1200); };
+  if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, () => fallback()); }
+  else { fallback(); }
+  function fallback() {
+    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy'); ta.remove(); done();
+  }
+}
+document.querySelectorAll('button[data-text]').forEach(b => b.addEventListener('click', () => copyText(b.dataset.text, b)));
 """
 
 
 def write_html(rows: list[Row], path: Path, stats: dict[str, object] | None = None,
-               contacts: dict[str, Row] | None = None) -> Path:
-    """`contacts` maps a company's name_key to its primary contact (Phase 2a), shown on each opening."""
+               contacts: dict[str, Row] | None = None, outreach: str = "") -> Path:
+    """`contacts` maps a company's name_key to its primary contact (Phase 2a), shown on each opening;
+    `outreach` is the Phase 2b HTML (today's batch, every target), shown above the openings."""
     from applyflow.discovery import name_key
     path.parent.mkdir(parents=True, exist_ok=True)
     e = html.escape
@@ -256,7 +408,7 @@ def write_html(rows: list[Row], path: Path, stats: dict[str, object] | None = No
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ApplyFlow Opportunities</title><style>{_CSS}</style></head>
 <body><main>
-<h1>Ranked opportunities</h1>
+{outreach or '<h1>Ranked opportunities</h1>'}
 <p class="sub">Generated {e(generated)} · <span id="count">{len(rows)}</span> shown</p>
 <div class="stats">{"".join(f'<div class="stat"><b>{e(str(v))}</b><span>{e(k)}</span></div>' for k, v in stat_boxes)}</div>
 <div class="filters">

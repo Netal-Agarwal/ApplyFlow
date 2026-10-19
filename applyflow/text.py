@@ -117,3 +117,37 @@ def extract_contact_emails(text: str) -> list[str]:
             continue
         kept.append(email)
     return kept
+
+
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style|noscript|svg|template)\b.*?</\1\s*>", re.I | re.S)
+_TITLE_TAG_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+_META_RE = re.compile(r"<meta\b[^>]*>", re.I)
+_ATTR_RE = re.compile(r"""([a-zA-Z:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+
+
+def page_summary(raw: str, max_snippet: int = 600) -> dict[str, str]:
+    """Title, meta description and the first readable lines of a homepage (Phase 2b personalization)."""
+    raw = raw or ""
+    title = html.unescape(" ".join((_TITLE_TAG_RE.search(raw) or [None, ""])[1].split()))
+    description = ""
+    for tag in _META_RE.findall(raw):
+        attrs = {k.lower(): (a or b) for k, a, b in _ATTR_RE.findall(tag)}
+        if attrs.get("name", attrs.get("property", "")).lower() in ("description", "og:description") \
+                and attrs.get("content", "").strip():
+            description = html.unescape(" ".join(attrs["content"].split()))
+            break
+    at = raw.lower().find("<body")
+    body = raw[raw.find(">", at) + 1:] if at >= 0 else raw
+    text = html_to_text(_SCRIPT_STYLE_RE.sub(" ", body))
+    lines, size = [], 0
+    for line in (ln.strip() for ln in text.split("\n")):
+        words = line.split()
+        if len(words) < 5 or line in lines:             # nav items, buttons, cookie labels
+            continue
+        if '="' in line or "data-" in line or sum(len(w) == 1 for w in words) > len(words) / 2:
+            continue                                     # attribute residue, "M a k e  a n y" letter art
+        lines.append(line)
+        size += len(line)
+        if size >= max_snippet:
+            break
+    return {"title": title[:200], "description": description[:400], "snippet": "\n".join(lines)[:max_snippet + 200]}

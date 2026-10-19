@@ -15,7 +15,7 @@ look, in order of trust, and stop early once a good contact for the right role t
      with no confirmed pattern, first@domain for them               -> guessed
 
 Mail servers are never probed. Nothing here sends anything; Phase 2b drafts, a human
-approves.
+approves. The homepage text read along the way is kept (company_context) for personalization.
 """
 
 from __future__ import annotations
@@ -35,13 +35,13 @@ from applyflow.discovery import board_identity, name_key, same_site, site_domain
 from applyflow.http import FetchError
 from applyflow.models import Job
 from applyflow.scoring import APPLY_ONLY_HINT, MARKETPLACE_HINT, hint_for_size
-from applyflow.text import extract_emails, html_to_text
+from applyflow.text import extract_emails, html_to_text, page_summary
 
 Log = Callable[[str], None]
 
 # Deliverability first: an address someone published beats one we generated (Phase 2a.1).
 CONFIDENCE = ["verified", "strong", "published_inbox", "guessed", "fallback"]
-SOURCE_ORDER = ["posting", "website", "github", "yc", "pattern"]
+SOURCE_ORDER = ["manual", "posting", "website", "github", "yc", "pattern"]
 
 # How well each kind of contact fits who we're told to look for (0 = best).
 ROLE_FIT = {
@@ -66,7 +66,7 @@ class Contact:
     role: str                 # title as published, or what the address is ("careers inbox")
     email: str
     confidence: str           # verified | strong | published_inbox | guessed | fallback
-    source: str               # posting | website | yc | github | pattern
+    source: str               # manual | posting | website | yc | github | pattern
     source_url: str
     group: str = "other"      # posting | founder | cto | eng_lead | recruiting | hiring_inbox | general_inbox | other
     fit: int = 9
@@ -97,7 +97,7 @@ class Person:
 class Target:
     key: str                  # discovered company key ("yc:slug") or "co:<name>"
     company: str
-    kind: str                 # role | general_outreach
+    kind: str                 # role | general_outreach | manual (add-target)
     hint: str                 # who to look for (scoring.contact_hint)
     website: str = ""
     domain: str = ""
@@ -108,6 +108,7 @@ class Target:
     jobs: list[Job] = field(default_factory=list)
     yc_slug: str = ""
     board_size: int | None = None
+    people: list[Person] = field(default_factory=list)    # named by hand (add-target --name)
 
     @property
     def small(self) -> bool:
@@ -129,6 +130,7 @@ class ContactResult:
     people: list[Person] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)          # what each source found
     why_primary: str = ""
+    context: dict[str, str] = field(default_factory=dict)     # homepage title / description / snippet
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +460,7 @@ class SiteFindings:
     read: list[str] = field(default_factory=list)
     blocked: list[str] = field(default_factory=list)                  # robots.txt said no
     failed: list[str] = field(default_factory=list)
+    home: dict[str, str] = field(default_factory=dict)                # homepage summary (Phase 2b)
 
 
 def read_site(client, website: str, domain: str, max_pages: int) -> SiteFindings:
@@ -480,6 +483,7 @@ def read_site(client, website: str, domain: str, max_pages: int) -> SiteFindings
         out.read.append(url)
         if url == root:
             queue.extend(likely_pages(page, root, max_pages))
+            out.home = {"website": root, "status": "ok", **page_summary(page)}
         text = html_to_text(page)
         for email in [m.strip().lower() for m in _MAILTO.findall(page)] + extract_emails(text):
             if same_site(email.rsplit("@", 1)[-1], domain) and email not in [e for e, _ in out.emails]:
@@ -676,7 +680,7 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
                               "or a posting email")
         return result
 
-    people: list[Person] = []
+    people: list[Person] = list(target.people)
     patterns: list[tuple[str, str, str]] = []           # (pattern, email, url)
     if target.apply_only:
         result.reasons.append("big company: only the posting's email is used")
@@ -684,6 +688,7 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
         # 2. The company's own site.
         site = read_site(client, target.website or f"https://{target.domain}", target.domain,
                          int(profile.contacts["max_site_pages"]))
+        result.context = site.home
         for p in site.people:
             if title_names_other_org(p.role, target.company):
                 result.reasons.append(f"ignored {p.name} ({p.role}): title names another organisation "
@@ -869,7 +874,37 @@ def build_targets(store, profile: Profile, seeds: list, client=None, log: Log = 
             hint=hint_for_size(row["team_size"], None, profile), website=website, domain=site_domain(website),
             domain_source="discovery" if site_domain(website) else "", team_size=row["team_size"],
             yc_slug=row["key"][3:] if row["key"].startswith("yc:") else "")
+    for row in store.manual_targets():         # add-target
+        targets.setdefault(row["key"], manual_target(row, profile))
     return list(targets.values())
+
+
+def manual_target(row, profile: Profile) -> Target:
+    """A target added by hand (add-target): general outreach, founder/CTO unless told otherwise."""
+    website = normalize_website(row["website"] or "")
+    people = [Person(name=row["person_name"], role=row["person_role"] or "contact", source="manual", source_url="")
+              ] if row["person_name"] and not row["email"] else []
+    return Target(key=row["key"], company=row["name"], kind="manual", hint="founder or CTO", website=website,
+                  domain=site_domain(website), domain_source="add-target" if site_domain(website) else "",
+                  people=people)
+
+
+def manual_result(target: Target, row) -> ContactResult:
+    """An address given with add-target --email: used as is (verified), no lookup."""
+    email = str(row["email"]).lower()
+    if row["person_name"]:
+        role = row["person_role"] or "contact"
+        group = role_group(role)
+    else:
+        kind = classify_address(email, small=True)
+        group, role = (kind[0], kind[1] or "address given with add-target") if kind else ("other", "address given")
+        if row["person_role"]:
+            role, group = row["person_role"], role_group(row["person_role"])
+    contact = Contact(name=row["person_name"] or "", role=role, email=email, confidence="verified", source="manual",
+                      source_url="", group=group, fit=0, note="given with add-target")
+    return ContactResult(target=target, status="found", contacts=[contact], considered=[contact],
+                         reasons=["address given with add-target; no lookup"],
+                         why_primary="given by hand with add-target")
 
 
 def result_to_json(result: ContactResult) -> dict[str, Any]:

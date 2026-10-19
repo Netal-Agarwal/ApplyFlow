@@ -25,14 +25,12 @@ decision-maker. Big companies are kept but mostly filter out (senior roles).
    - **2a contacts - done (2026-10-19)**, see "Phase 2a notes" below and `tests/test_contacts.py`.
    - **2a.1 trustworthy contacts - done (2026-10-19)**, see "Phase 2a.1 notes" and
      `tests/test_contacts_2a1.py`.
-   - **2b drafting - next**: research the company, draft a personalized email per opening
-     (and a general "I'd love to work with you" email for `general_outreach` targets), with a
-     review/approve screen. An LLM is allowed for research/drafting ("pipeline with agentic
-     parts"), never for sending decisions. Candidate phone/LinkedIn/GitHub for signatures are
-     in `profile.yaml` (`candidate.*`).
+   - **2b drafts & send-ready report - done (2026-10-19)**, see "Phase 2b notes" and
+     `tests/test_drafting.py`. An LLM is allowed for research/drafting, never for sending decisions.
 3. Sending & follow-ups: Gmail API (OAuth) from the user's **personal Gmail**.
    Ramp from ~10-15/day to 30-40/day max. Randomized gaps, business hours in the
-   recipient's timezone, no open-tracking pixels, no attachments (resume link only),
+   recipient's timezone, no open-tracking pixels, resume linked (attached only for recruiters/HR or
+   when a posting asks for one by email - the 2b `resume_action` rule),
    reply detection stops sequences, 1-2 follow-ups, permanent do-not-contact list.
 4. Insights: reply/interview rates by source, tier, template.
 
@@ -73,6 +71,11 @@ python -m applyflow explain "..." # why one job scored what it did
 python -m applyflow verify-boards # re-check discovered boards belong to their company
 python -m applyflow contacts      # who to email at each target (--company NAME, --force)
 python -m applyflow explain-contact "..."  # every contact candidate and why the primary won
+python -m applyflow draft-pack    # homepage context, template drafts, packets (output/drafts/packets)
+python -m applyflow import-drafts # load output/drafts/written/<id>.md, validated
+python -m applyflow queue --date YYYY-MM-DD   # the day's batch (stored); report shows it
+python -m applyflow mark-sent <id> | --batch YYYY-MM-DD ; mark-bounced <id>
+python -m applyflow add-target "Co" --website co.com [--note] [--email] [--name] [--role]
 pytest
 ```
 
@@ -133,6 +136,70 @@ Open points for 2b / later:
    no usable address; they're not apply-only because their size is unknown. Adding `team_size:` to
    seeds (or a size source for HN companies) would route the big ones to apply-only.
 5. Role targets' `roles` column is captured at lookup time; it refreshes only on a re-check.
+
+## Phase 2b notes (drafts, queue, report)
+
+- **Facts**: `candidate.facts` in profile.yaml (from `config/private/Netal_Agarwal_Resume.pdf`, gitignored) is
+  the only thing drafts may say about the candidate. Validation enforces it for numbers and named
+  technologies (a tech from the company's own text is allowed only in a sentence about them: "your ...").
+- **Modules**: `drafting.py` (facts, inputs, templates, validation, packets, Gmail URL) is pure;
+  `outreach.py` (items, send tiers, bounces, queue, context fetch, import, add-target) talks to the store.
+  Target id = company_key with non-alphanumerics as "-" (`yc-clickpe`, `co-singlestore`, `manual-acme`).
+- **Two email types**: role (names the role, one company line, best project by lead_project + JD stack,
+  availability, low-pressure ask) and general outreach (what stood out from one-liner / site, contribution,
+  "open to a January 2027 intern or 2027 new grad, or a short chat"). Manual targets use general outreach.
+  "Hi <First>," for a person, "Hi <Company> team," for an inbox (`display_company` drops ", Inc.").
+  Remote-global = role `remote_open`, or a company location that's "Remote" / outside India -> time-zone line.
+- **Validation** (`drafting.validate`, also run on templates): 120-160 words between greeting and sign-off,
+  exact greeting, exact signature after a sign-off line, resume line matching `resume_action`, no
+  brackets/placeholders, role named, time-zone line when remote, no buzzwords, subject <=90 chars and not
+  clickbait, numbers/tech from facts. A written draft failing any rule stays on the template with the reasons
+  (also when a bounce moves the target to a different person: greeting no longer matches).
+- **resume_action**: attach for recruiting / hiring-inbox contacts (hr@, talent@, careers@...) or a posting that
+  asks for a resume by email; else link (signature has the resume URL). Gmail compose links can't attach: the
+  user attaches the PDF by hand.
+- **Send tiers**: 1 = verified or recruiter/HR (published), 2 = published inbox / strong / fallback, 3 = guessed,
+  behind the tier-3 gate (see "Phase 2b polish"). One per company (domain), DNC (any of
+  the target's addresses or its domain) and already-sent skipped. `queue` stores `send_queue`; re-running a day
+  keeps entries already sent. Bounce order: primary, its alternates, then each backup and its alternates.
+- **Context**: `company_context` (homepage title, meta description, ~600-char snippet) captured by `read_site`
+  during `contacts`, or fetched by `draft-pack` (one page, robots.txt respected; blocked/failed recorded, not
+  retried unless `--refetch`). `get_page` now decodes UTF-8 when no charset is declared (was Latin-1 mojibake).
+- Live 2026-10-19: 51 targets (9 role, 42 general outreach); ready 42 (T1 3, T2 7, T3 32), no contact 5,
+  apply-only 3, no domain 1. Context: 45 ok, 2 robots-blocked (Morphle, Helloverify), 1 HTTP 403 (Enveritas).
+  42 Claude-written drafts imported (all pass), 9 templates (the non-send-ready targets). Day-1 batch = 10
+  (T1 + T2); the 32 guessed founders wait for the tier-3 gate.
+
+Open points for Phase 3 / later:
+1. Only 10 tier-1/2 targets exist: after the first batch, nothing else is sendable until tier 3 unlocks
+   (2 days later at the earliest). More published inboxes (or verified contacts) would fill that gap.
+2. Written drafts are static text: a contact or role change only shows up as a validation failure (template
+   fallback), never as an updated written draft. Re-run `draft-pack` and rewrite those.
+3. The fact check covers numbers and named technologies, not every claim; the review screen is still the guard.
+4. Gmail compose URLs get long (~2-3 KB); fine for Gmail today, but Phase 3 should send via the API instead.
+
+## Phase 2b polish notes (2026-10-19)
+
+- **Credentials line** in every email, right after the project paragraph: the DRDO (DEAL lab) internship and the
+  published patent, in one short sentence. Facts: `experience[0].short` ("DRDO's DEAL lab") and `patent.short`
+  ("Android attention management"); `Facts.credentials()` builds the template wording. Validation now fails a
+  draft that doesn't mention the internship's org (`org_short`, "DRDO") and the word "patent". The 42 written
+  drafts rotate six wordings. The template's old DRDO / patent filler sentences are gone (one DRDO-detail filler
+  remains for short drafts).
+- **Draft review**: company lines rewritten as own-voice observations rather than close paraphrases of site copy
+  (Cardboard, SingleStore, RocketSDR, Landeed, xPay, Infer, Explorex, Rivia, Zuddl, PrimeVault, Optifye, Drip,
+  ClickPe, AlgoTest, IMT Care, Swadesh, BusinessOnBot, Kalam, GroMo, Binks, ZiffyHomes, ...); closings vary across
+  three low-pressure wordings and never reuse the opening's ask ("considered"). The role template closes with
+  "I'd be happy to talk whenever it suits you." The style guide says all three things.
+- **Tier-3 gate** (`outreach.tier3` in the profile, `outreach.tier3_gate`), replacing day 8:
+  locked until `unlock_after_days` (2) calendar days after the first mark-sent, and only if no bounce has been
+  recorded before tier 3 starts; then `start_per_day` (5), counted inside `daily_batch`; `ramp_per_day` (10) from
+  `ramp_after_days` (3) after the first tier-3 send; paused whenever bounces / sends >= `max_bounce_rate` (5%),
+  resuming when more tier 1-2 sends bring it back under. `queue` and the report print the gate's reason.
+  `outreach_events.send_tier` records each send's tier (needed to know when tier 3 started).
+- "rails" dropped from the fact-check tech list (false positive on "payment rails"; "ruby on rails" stays).
+- Live: 42/42 written drafts pass; 2026-10-20 preview = the same 10 tier-1/2 targets; tier 3 "locked: nothing
+  sent yet".
 
 ## Calibration backlog
 

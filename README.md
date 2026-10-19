@@ -18,7 +18,7 @@ startup openings higher.
 | Phase | What it does | Status |
 |---|---|---|
 | **1. Discovery & scoring** | Discover hiring startups; collect openings from ATS job boards and HN; filter and rank them against your profile; export a report | ✅ This release |
-| 2. Contacts & drafting | Find the right hiring contact; research the company; draft a personalized email per opening; review/approve screen | Planned |
+| 2. Contacts & drafting | Find the right hiring contact; research the company; draft a personalized email per target; send-ready report with today's batch | ✅ |
 | 3. Sending & follow-ups | Gmail API sending with ramped daily caps, reply detection, automatic follow-ups, do-not-contact list | Planned |
 | 4. Insights | Reply and interview rates by source, tier and template; more sources | Planned |
 
@@ -63,6 +63,12 @@ companies, about 3-5 minutes), and `run` daily (a minute or two).
 | `python -m applyflow verify-boards` | Check every discovered board belongs to its company; demote mismatches |
 | `python -m applyflow contacts [--company NAME] [--force]` | Find the best person to email at each outreach target; writes `output/contacts.csv` |
 | `python -m applyflow explain-contact "<company>"` | Every contact candidate considered, and why the primary won |
+| `python -m applyflow draft-pack [--refetch]` | Fetch company homepage context, refresh template drafts, write a drafting packet per target to `output/drafts/packets` |
+| `python -m applyflow import-drafts` | Load drafts written to `output/drafts/written/<id>.md`; each is validated, failures stay on the template |
+| `python -m applyflow queue --date YYYY-MM-DD [--size 20]` | Pick the day's batch: tier 1 (verified, recruiter/HR), tier 2 (published inbox), tier 3 (guessed) behind a bounce-aware gate (`outreach.tier3`) |
+| `python -m applyflow mark-sent <id>` / `--batch YYYY-MM-DD` | Record emails you sent (ApplyFlow never sends) |
+| `python -m applyflow mark-bounced <id>` | Record a bounce; the next alternate or backup address is suggested |
+| `python -m applyflow add-target "Co" --website co.com [--note] [--email] [--name] [--role]` | Add your own target; finds a contact unless you give an email |
 
 ## How it works
 

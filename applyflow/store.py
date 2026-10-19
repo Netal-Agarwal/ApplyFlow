@@ -120,6 +120,77 @@ CREATE TABLE IF NOT EXISTS mx_cache (
     checked_at    TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS company_context (   -- Phase 2b: what personalization is built from
+    company_key      TEXT PRIMARY KEY,
+    website          TEXT,
+    homepage_title   TEXT,
+    meta_description TEXT,
+    snippet          TEXT,                     -- first readable lines of the homepage
+    status           TEXT NOT NULL,            -- ok | blocked (robots.txt) | failed
+    note             TEXT,
+    fetched_at       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS manual_targets (    -- add-target
+    key           TEXT PRIMARY KEY,            -- "manual:<name>"
+    name          TEXT NOT NULL,
+    website       TEXT,
+    note          TEXT,
+    email         TEXT,
+    person_name   TEXT,
+    person_role   TEXT,
+    added_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS drafts (            -- the current draft per target (template or written)
+    target_id      TEXT PRIMARY KEY,
+    company_key    TEXT NOT NULL,
+    company        TEXT,
+    kind           TEXT,
+    to_email       TEXT,
+    contact_name   TEXT,
+    contact_role   TEXT,
+    confidence     TEXT,
+    send_tier      INTEGER,
+    status         TEXT,                       -- ready | sent | no_contact | apply_only | ...
+    resume_action  TEXT,                       -- link | attach
+    subject        TEXT,
+    body           TEXT,
+    source         TEXT,                       -- template | claude
+    notes          TEXT,                       -- JSON: why a written draft was rejected
+    updated_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS written_drafts (    -- import-drafts: the text as written, validated on use
+    target_id   TEXT PRIMARY KEY,
+    subject     TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    file        TEXT,
+    imported_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS outreach_events (   -- sent / bounced history (never deleted)
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_id   TEXT NOT NULL,
+    company_key TEXT,
+    email       TEXT NOT NULL,
+    event       TEXT NOT NULL,                 -- sent | bounced
+    send_tier   INTEGER,                       -- the address's tier when sent (tier-3 gate)
+    event_date  TEXT NOT NULL,                 -- YYYY-MM-DD
+    batch_date  TEXT,
+    recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_target ON outreach_events(target_id);
+
+CREATE TABLE IF NOT EXISTS send_queue (
+    batch_date  TEXT NOT NULL,
+    position    INTEGER NOT NULL,
+    target_id   TEXT NOT NULL,
+    email       TEXT NOT NULL,
+    send_tier   INTEGER,
+    PRIMARY KEY (batch_date, target_id)
+);
+
 CREATE TABLE IF NOT EXISTS collection_runs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     board_key   TEXT NOT NULL,
@@ -150,7 +221,7 @@ class Store:
         for table, column, decl in (("jobs", "team_size", "INTEGER"), ("scores", "contact_hint", "TEXT"),
                                      ("scores", "merged_locations", "TEXT"), ("companies", "detected_from", "TEXT"),
                                      ("companies", "status_reason", "TEXT"), ("contacts", "alternates", "TEXT"),
-                                     ("contacts", "mx", "TEXT")):
+                                     ("contacts", "mx", "TEXT"), ("outreach_events", "send_tier", "INTEGER")):
             cols = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
@@ -372,6 +443,8 @@ class Store:
                     "found_at, is_primary, rank, alternates, mx) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (t.key, t.company, c.name, c.role, c.email, c.confidence, c.source, c.source_url, now,
                      int(rank == 0), rank, json.dumps(c.alternates), c.mx))
+            if getattr(result, "context", None):          # homepage text read during the lookup (2b)
+                self._write_context(t.key, result.context)
             from applyflow.contacts import result_to_json
             self.conn.execute(
                 """
@@ -432,6 +505,110 @@ class Store:
                 "LEFT JOIN contacts c ON c.company_key = k.company_key AND c.is_primary = 1"):
             counts[row[0]] = counts.get(row[0], 0) + 1
         return counts
+
+    # -- outreach (Phase 2b) ---------------------------------------------------
+
+    def save_context(self, company_key: str, ctx: dict[str, str]) -> None:
+        with self.conn:
+            self._write_context(company_key, ctx)
+
+    def _write_context(self, company_key: str, ctx: dict[str, str]) -> None:
+        self.conn.execute(
+            "INSERT INTO company_context (company_key, website, homepage_title, meta_description, snippet, status, "
+            "note, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(company_key) DO UPDATE SET "
+            "website=excluded.website, homepage_title=excluded.homepage_title, "
+            "meta_description=excluded.meta_description, snippet=excluded.snippet, status=excluded.status, "
+            "note=excluded.note, fetched_at=excluded.fetched_at",
+            (company_key, ctx.get("website", ""), ctx.get("title", ""), ctx.get("description", ""),
+             ctx.get("snippet", ""), ctx.get("status", "ok"), ctx.get("note", ""), _now()))
+
+    def get_context(self, company_key: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM company_context WHERE company_key = ?", (company_key,)).fetchone()
+
+    def discovered_company(self, key: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM companies WHERE key = ?", (key,)).fetchone()
+
+    def upsert_manual_target(self, key: str, name: str, website: str, note: str = "", email: str = "",
+                             person_name: str = "", person_role: str = "") -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO manual_targets (key, name, website, note, email, person_name, person_role, added_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET name=excluded.name, "
+                "website=excluded.website, note=excluded.note, email=excluded.email, "
+                "person_name=excluded.person_name, person_role=excluded.person_role",
+                (key, name, website, note, email.lower(), person_name, person_role, _now()))
+
+    def manual_targets(self) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM manual_targets ORDER BY name").fetchall()
+
+    def get_manual_target(self, key: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM manual_targets WHERE key = ?", (key,)).fetchone()
+
+    def save_drafts(self, items) -> None:
+        """Replace the stored drafts with these outreach items' current drafts."""
+        now = _now()
+        with self.conn:
+            self.conn.execute("DELETE FROM drafts")
+            for it in items:
+                d, i = it.draft, it.inputs
+                self.conn.execute(
+                    "INSERT INTO drafts (target_id, company_key, company, kind, to_email, contact_name, contact_role, "
+                    "confidence, send_tier, status, resume_action, subject, body, source, notes, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (it.target_id, it.company_key, i.company, i.kind, i.to_email, i.contact_name, i.contact_role,
+                     i.confidence, it.send_tier, it.status, d.resume_action, d.subject, d.body, d.source,
+                     json.dumps(d.failures), now))
+
+    def drafts(self) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM drafts ORDER BY target_id").fetchall()
+
+    def save_written(self, target_id: str, subject: str, body: str, file: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO written_drafts (target_id, subject, body, file, imported_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(target_id) DO UPDATE SET subject=excluded.subject, body=excluded.body, "
+                "file=excluded.file, imported_at=excluded.imported_at", (target_id, subject, body, file, _now()))
+
+    def written_drafts(self) -> dict[str, sqlite3.Row]:
+        return {r["target_id"]: r for r in self.conn.execute("SELECT * FROM written_drafts")}
+
+    def add_event(self, target_id: str, company_key: str, email: str, event: str, event_date: str,
+                  batch_date: str = "", send_tier: int | None = None) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO outreach_events (target_id, company_key, email, event, event_date, batch_date, "
+                "recorded_at, send_tier) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (target_id, company_key, email.lower(), event, event_date, batch_date, _now(), send_tier))
+
+    def events(self) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM outreach_events ORDER BY event_date, id").fetchall()
+
+    def first_sent_date(self) -> str | None:
+        return self.conn.execute("SELECT MIN(event_date) FROM outreach_events WHERE event = 'sent'").fetchone()[0]
+
+    def send_history(self, upto: str | None = None) -> dict[str, object]:
+        """Totals the tier-3 gate needs, counting events dated up to `upto` (YYYY-MM-DD) when given."""
+        cond, args = ("AND event_date <= ?", (upto,)) if upto else ("", ())
+        row = self.conn.execute(
+            "SELECT MIN(CASE WHEN event = 'sent' THEN event_date END), SUM(event = 'sent'), SUM(event = 'bounced'), "
+            "MIN(CASE WHEN event = 'sent' AND send_tier = 3 THEN event_date END) "
+            f"FROM outreach_events WHERE 1 = 1 {cond}", args).fetchone()
+        return {"first_sent": row[0], "sent": row[1] or 0, "bounced": row[2] or 0, "tier3_first_sent": row[3]}
+
+    def save_queue(self, batch_date: str, rows: list[tuple[str, str, int | None]], keep: set[str]) -> None:
+        """Replace a day's queue with rows of (target_id, email, tier), keeping entries in `keep` (already sent)."""
+        with self.conn:
+            kept = [r for r in self.queue(batch_date) if r["target_id"] in keep]
+            self.conn.execute("DELETE FROM send_queue WHERE batch_date = ?", (batch_date,))
+            ordered = [(r["target_id"], r["email"], r["send_tier"]) for r in kept]
+            ordered += [r for r in rows if r[0] not in {k[0] for k in ordered}]
+            for pos, (target_id, email, tier) in enumerate(ordered, start=1):
+                self.conn.execute("INSERT INTO send_queue (batch_date, position, target_id, email, send_tier) "
+                                  "VALUES (?, ?, ?, ?, ?)", (batch_date, pos, target_id, email, tier))
+
+    def queue(self, batch_date: str) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM send_queue WHERE batch_date = ? ORDER BY position",
+                                 (batch_date,)).fetchall()
 
     def _reject_reason_counts(self, limit: int = 8) -> list[tuple[str, int]]:
         """Group rejection reasons into broad categories ("asks for N+ years" -> one bucket)."""

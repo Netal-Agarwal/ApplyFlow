@@ -10,15 +10,56 @@
 candidate:
   name: "Your Name"
   email: "you@example.com"          # used later as the sender; optional for Step 1
-  resume_url: ""                    # hosted PDF link, used in Phase 2 emails
+  resume_url: "https://example.com/your-resume.pdf"   # hosted PDF link, used in Phase 2 email signatures
   graduation: "2027-05"
   internship_available_from: "2027-01"
   # Optional: identifies you in the HTTP User-Agent so site operators can reach you.
   contact_for_user_agent: ""
   # Shown in Phase 2 email signatures. Placeholders only here; real values go in profile.yaml.
-  phone: "+91-XXXXXXXXXX"
+  phone: "+91 90000 00000"
   linkedin_url: "https://www.linkedin.com/in/your-handle/"
   github_url: "https://github.com/your-username"
+  # Phase 2b: the ONLY facts email drafts may use. Numbers and tech terms in a draft must appear
+  # somewhere in this block (or in the company's own posting / site text), or the draft fails
+  # validation. Sample values below - replace every one with your own.
+  facts:
+    first_name: "Your"
+    degree_short: "B.Tech CS"
+    college_short: "Example University"
+    signature_title: "B.Tech CS, Example University (2027)"
+    education: "B.Tech in Computer Science, Example University, 2023 - 2027"
+    graduation: "May 2027"
+    internship: "a 6-month internship from January 2027"
+    full_time: "a full-time new-grad role from mid-2027"
+    focus: "backend systems and REST APIs"
+    coursework: "Data Structures & Algorithms, Operating Systems, DBMS, Computer Networks"
+    skills: [Python, FastAPI, Flask, REST APIs, PostgreSQL, MongoDB, AWS, AWS Lambda, S3, DynamoDB, React, Git]
+    experience:
+      - name: "summer research internship"
+        role: "summer research intern"
+        org: "Example Research Lab"
+        org_short: "Example Research Lab"
+        short: "Example Research Lab"     # used in the one-line credentials sentence
+        when: "May-Jun 2025"
+        detail: "compared three scheduling approaches for a lab network and documented the trade-offs"
+    patent:
+      title: ""             # leave empty if you have none
+      published: ""
+      short: ""             # e.g. "Android attention management"
+      detail: ""
+    projects:               # lead_project names in role_families refer to these
+      - name: "CareerForge AI"
+        stack: "React, FastAPI, PostgreSQL"
+        detail: "a full-stack web app with 12 REST endpoints and 40+ automated API tests"
+        keywords: [backend, api, python, product, platform]
+      - name: "Judicial AI System"
+        stack: "Python, Flask, Neo4j"
+        detail: "an NLP pipeline over 1,000+ documents with a Neo4j graph of the extracted entities"
+        keywords: [ai, nlp, llm, ml, data, graph, agent]
+      - name: "Serverless FileFinder"
+        stack: "AWS Lambda, S3, DynamoDB"
+        detail: "a serverless file service on 6 AWS Lambda functions with DynamoDB metadata search"
+        keywords: [cloud, aws, serverless, infrastructure, payments, fintech]
 
 # ---------------------------------------------------------------------------
 # Tracks: which kinds of openings you want.
@@ -249,6 +290,21 @@ large_company_job_count: 60
 # the hiring company. Their roles stay in the report with action "apply"; they're never contact
 # targets. Postings that say "our client" / "one of our clients" are treated the same way.
 recruiting_marketplaces: ["Weekday"]
+
+# ---------------------------------------------------------------------------
+# Outreach (Phase 2b): drafts and the daily send queue. ApplyFlow never sends anything:
+# you send from Gmail and record it with `mark-sent`.
+# ---------------------------------------------------------------------------
+outreach:
+  daily_batch: 20          # emails picked by `queue` per day
+  tier3:                   # guessed addresses (send tier 3), inside the same daily_batch total
+    unlock_after_days: 2   # calendar days after the first mark-sent, and only if nothing has bounced
+    start_per_day: 5       # tier-3 emails per day once unlocked
+    ramp_after_days: 3     # days after the first tier-3 send before the higher limit...
+    ramp_per_day: 10       # ...if the overall bounce rate stays under max_bounce_rate
+    max_bounce_rate: 0.05  # bounces / sends at or above this pauses tier 3
+  min_words: 120           # draft length, counted between the greeting and the sign-off
+  max_words: 160
 
 # ---------------------------------------------------------------------------
 # Contacts (Phase 2a): who to email at each target company.
