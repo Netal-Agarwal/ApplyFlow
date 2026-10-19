@@ -1,0 +1,14 @@
+{
+ "Status": 2,
+ "TC": false,
+ "RD": true,
+ "RA": true,
+ "AD": false,
+ "CD": false,
+ "Question": [
+  {
+   "name": "broken.example",
+   "type": 15
+  }
+ ]
+}

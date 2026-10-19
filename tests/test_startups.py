@@ -192,7 +192,7 @@ class StartupScoringTests(unittest.TestCase):
     def test_contact_hints(self):
         self.assertEqual(contact_hint(self.job(team_size=20), self.profile), "founder or CTO")
         self.assertEqual(contact_hint(self.job(team_size=150), self.profile), "engineering manager or tech lead")
-        self.assertEqual(contact_hint(self.job(team_size=5000), self.profile), "recruiter or engineering manager")
+        self.assertEqual(contact_hint(self.job(team_size=5000), self.profile), "apply via posting")     # 2a.1
         self.assertEqual(contact_hint(self.job(board_size=3), self.profile), "founder or CTO")
         hn = self.job(source="hn", emails=["a@b.co"])
         self.assertEqual(contact_hint(hn, self.profile), "the email in the post")

@@ -1,0 +1,21 @@
+{
+ "hits": [
+  {
+   "objectID": "70001",
+   "parent_id": 49922569,
+   "story_id": 49922569,
+   "author": "vdb",
+   "created_at": "2026-10-05T10:00:00Z",
+   "comment_text": "VectorDB Co | Software Engineer, AI Platform | Full Time, Remote India | <p>We build a distributed SQL + vector database. Python, Go, distributed systems.<p>Interested? Email pavan.k@vectordb.example with your resume."
+  },
+  {
+   "objectID": "70002",
+   "parent_id": 49922569,
+   "story_id": 49922569,
+   "author": "solo",
+   "created_at": "2026-10-05T11:00:00Z",
+   "comment_text": "Solo Labs | Backend Engineer | Remote (India OK) | <p>Python, FastAPI. Write to solo.founder.hiring@gmail.com"
+  }
+ ],
+ "nbPages": 1
+}

@@ -1,0 +1,22 @@
+{
+ "Status": 0,
+ "TC": false,
+ "RD": true,
+ "RA": true,
+ "AD": false,
+ "CD": false,
+ "Question": [
+  {
+   "name": "nomail.example",
+   "type": 15
+  }
+ ],
+ "Answer": [
+  {
+   "name": "nomail.example",
+   "type": 15,
+   "TTL": 300,
+   "data": "0 ."
+  }
+ ]
+}

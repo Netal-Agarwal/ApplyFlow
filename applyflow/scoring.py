@@ -349,6 +349,7 @@ def is_startup(job: Job, profile: Profile) -> bool:
 
 
 MARKETPLACE_HINT = "recruiting marketplace – apply via their posting"
+APPLY_ONLY_HINT = "apply via posting"     # big companies: their hiring runs through the posting
 # "One of our clients is hiring", "Our client, a Series A fintech, ..." - but not boilerplate like
 # "innovation for our clients" (Rubrik) or "protect our client's data".
 _CLIENT_RE = re.compile(r"\bone of our clients\b|\bour client\b(?!s|['’]s)|\bon behalf of (?:our|a|one of our) clients?\b",
@@ -372,8 +373,17 @@ def marketplace_reason(job: Job, profile: Profile) -> str | None:
     return None
 
 
+def is_big_company(team_size: int | None, board_size: int | None, profile: Profile) -> bool:
+    """More than contacts.apply_only_team_size people, or (size unknown) a large job board."""
+    if team_size is not None:
+        return team_size > int(profile.contacts["apply_only_team_size"])
+    return board_size is not None and board_size > profile.large_company_job_count
+
+
 def hint_for_size(team_size: int | None, board_size: int | None, profile: Profile) -> str:
     """Who to contact at a company of this size (see contact_hint)."""
+    if is_big_company(team_size, board_size, profile):
+        return APPLY_ONLY_HINT
     cfg = profile.startup
     small = (
         team_size is not None and team_size <= int(cfg["founder_contact_max_team_size"])
@@ -401,7 +411,7 @@ def decide_action(job: Job, location_class: str, profile: Profile) -> str:
         return "email" if job.emails else "apply"
     if location_class == "abroad_onsite":
         return "apply"          # sponsored relocation runs through formal hiring
-    if job.board_size is not None and job.board_size > profile.large_company_job_count:
+    if is_big_company(job.team_size, job.board_size, profile):
         return "apply"
     return "apply_plus_email"
 

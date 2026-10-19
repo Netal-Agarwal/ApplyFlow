@@ -257,6 +257,10 @@ contacts:
   recheck_days: 30          # look a company up again at most this often (unless --force)
   max_site_pages: 5         # pages read on the company's site besides the homepage
   github_max_members: 10    # public org members looked up per company (GitHub allows 60 calls/hour)
+  apply_only_team_size: 300 # more people than this (or, size unknown, a board bigger than
+                            # large_company_job_count): apply via the posting, no contact search
+                            # unless a posting lists an email
+  mx_cache_days: 30         # how long a domain's MX lookup is trusted
 
 # ---------------------------------------------------------------------------
 # Startups. Smaller teams hire freshers more readily and a cold email reaches

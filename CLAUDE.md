@@ -23,6 +23,8 @@ decision-maker. Big companies are kept but mostly filter out (senior roles).
    scoring, HTML/CSV report.
 2. Contacts & drafting:
    - **2a contacts - done (2026-10-19)**, see "Phase 2a notes" below and `tests/test_contacts.py`.
+   - **2a.1 trustworthy contacts - done (2026-10-19)**, see "Phase 2a.1 notes" and
+     `tests/test_contacts_2a1.py`.
    - **2b drafting - next**: research the company, draft a personalized email per opening
      (and a general "I'd love to work with you" email for `general_outreach` targets), with a
      review/approve screen. An LLM is allowed for research/drafting ("pipeline with agentic
@@ -96,19 +98,40 @@ pytest
 - Live 2026-10-19: 51 targets (9 role, 42 general outreach). Primary: guessed 42, fallback 1,
   none 4, no_domain 4, verified 0, strong 0. 32 of the guessed names came from YC pages.
 
+## Phase 2a.1 notes (trustworthy contacts)
+
+- **Ranking is deliverability first**: verified > strong > published_inbox > guessed > fallback;
+  role fit only breaks ties within a level. At <=50 people (contact_hint "founder or CTO"),
+  founders@ / careers@ / jobs@ / hiring@ / talent@ / hr@ and hello@ / team@ / hi@ / contact@ / info@
+  are `published_inbox` (founders@ and hiring inboxes first); above 50 they're `fallback`.
+  Tool/system addresses (jira@, noreply@, support@, help-*, billing@, privacy@, security@, press@,
+  legal@, and "support"/"billing"/... anywhere in the address) are dropped.
+- **Posting emails always count** (verified), even with no domain; the domain is then taken from a
+  non-freemail posting address (SingleStore: pkhaitan@singlestore.com).
+- **MX check** before keeping any contact: DNS-over-HTTPS (Cloudflare JSON, Google as fallback) via
+  `PoliteClient.get_api`, cached in `mx_cache` for `contacts.mx_cache_days` (30). No MX / NXDOMAIN /
+  null MX -> contacts dropped with a reason; a failed lookup keeps them marked "MX unchecked"
+  (failures aren't cached).
+- **Guesses carry alternates**: first@ plus first.last@ and firstlast@ when the surname is known (not an
+  initial). Guessed / published-inbox people get LinkedIn people-search and Google links in
+  contacts.csv and the report - links only, never fetched.
+- **Apply-only**: > `contacts.apply_only_team_size` (300) people, or size unknown with a board bigger
+  than `large_company_job_count` -> contact_hint "apply via posting", action apply, no contact
+  search unless a posting lists an email.
+- Live 2026-10-19 (51 targets): role verified 1, published_inbox 1, none 4, apply_only 2,
+  no_domain 1; general outreach published_inbox 8, guessed 32, none 1, apply_only 1. MX: 42 domains,
+  all with MX, 0 lookup failures. GitHub: 0 emails again (48 Supabase + 19 Odoo members, unauthenticated).
+
 Open points for 2b / later:
-1. **Almost everything is "guessed".** Indian startup sites rarely publish personal emails in HTML
-   (often JS-rendered or behind forms), so no pattern got confirmed live. Drafts to guessed
-   addresses need care (Phase 3 bounce handling); consider preferring a published founders@ inbox
-   over a guessed founder address - today role fit wins (Cardboard: guessed ishan@ above the
-   published founders@cardboard.ai).
-2. **GitHub gave nothing unauthenticated.** GitHub's docs say `/users/{u}` shows a public email only
-   to authenticated requests; live, 0 of the members looked up had an email, and the 60/hour limit
-   was hit on the third pass. Consider a token (free) or dropping the source.
-3. **No domain for 4 role targets** (Stripe, Rubrik, PostHog, SingleStore: seeds without `website`,
-   boards that don't link one). Add `website:` to those seeds.
-4. **Big companies** (Odoo, Supabase, Stripe) don't fit founder/site-scraping; their primary was
-   jira@odoo.com (fallback) or none. Apply via the posting is the realistic route there.
+1. **Still mostly guessed** (32 of 42 general-outreach primaries). Phase 3 needs bounce handling that
+   walks the stored alternates; drafts to a guessed address should say so in the review screen.
+2. **GitHub gives nothing unauthenticated** (two live passes, 0 member emails; the 60/hour limit is hit
+   on repeated runs). A free token would help, or drop the source.
+3. **PostHog has no domain and isn't apply-only**: its seed has no team size and its board has 10
+   roles. Add `website:` (and `team_size:` if known) to the seed, as for any seed without one.
+4. **Odoo / Supabase / Sarvam / Enveritas: none.** Big or mid companies with unknown size that publish
+   no usable address; they're not apply-only because their size is unknown. Adding `team_size:` to
+   seeds (or a size source for HN companies) would route the big ones to apply-only.
 5. Role targets' `roles` column is captured at lookup time; it refreshes only on a re-check.
 
 ## Calibration backlog

@@ -70,7 +70,8 @@ def extract_emails(text: str) -> list[str]:
     """Find emails, including common obfuscations like 'jobs [at] acme [dot] com'."""
     found: list[str] = []
     for match in _EMAIL_RE.findall(text):
-        found.append(match.rstrip(".").lower())
+        # Page scripts JSON-escape "<" / ">" as < / >, which glue onto the address.
+        found.append(re.sub(r"^(?:u00[0-9a-f]{2})+", "", match.rstrip(".").lower()))
     for pattern in _OBFUSCATED_EMAIL_RES:
         for user, domain in pattern.findall(text):
             domain = _DOT_RE.sub(".", domain).replace(" ", "")

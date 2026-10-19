@@ -1,0 +1,22 @@
+{
+ "Status": 3,
+ "TC": false,
+ "RD": true,
+ "RA": true,
+ "AD": false,
+ "CD": false,
+ "Question": [
+  {
+   "name": "gone.example",
+   "type": 15
+  }
+ ],
+ "Authority": [
+  {
+   "name": "gone.example",
+   "type": 6,
+   "TTL": 900,
+   "data": "a.iana-servers.net. hostmaster.example. 2026101901 7200 3600 1209600 300"
+  }
+ ]
+}

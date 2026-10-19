@@ -1,0 +1,28 @@
+{
+ "Status": 0,
+ "TC": false,
+ "RD": true,
+ "RA": true,
+ "AD": false,
+ "CD": false,
+ "Question": [
+  {
+   "name": "deltaai.example",
+   "type": 15
+  }
+ ],
+ "Answer": [
+  {
+   "name": "deltaai.example",
+   "type": 15,
+   "TTL": 300,
+   "data": "1 aspmx.l.google.com."
+  },
+  {
+   "name": "deltaai.example",
+   "type": 15,
+   "TTL": 300,
+   "data": "5 alt1.aspmx.l.google.com."
+  }
+ ]
+}

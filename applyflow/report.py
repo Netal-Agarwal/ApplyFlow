@@ -79,12 +79,22 @@ def write_companies_csv(rows: list[Row], path: Path) -> Path:
     return path
 
 
-CONTACT_FIELDS = [
-    "target_type", "company", "domain", "team_size", "roles", "best_score", "status",
-    "primary_name", "primary_role", "primary_email", "primary_confidence", "primary_source", "primary_source_url",
-    "backup1_name", "backup1_role", "backup1_email", "backup1_confidence",
-    "backup2_name", "backup2_role", "backup2_email", "backup2_confidence", "notes",
-]
+_CONTACT_COLUMNS = ["name", "role", "email", "confidence", "alternates", "mx", "linkedin_search", "google_search"]
+CONTACT_FIELDS = (
+    ["target_type", "company", "domain", "team_size", "roles", "best_score", "status"]
+    + [f"primary_{c}" for c in _CONTACT_COLUMNS] + ["primary_source", "primary_source_url"]
+    + [f"backup1_{c}" for c in _CONTACT_COLUMNS] + [f"backup2_{c}" for c in _CONTACT_COLUMNS] + ["notes"]
+)
+
+
+def _contact_cells(c: Row, company: str) -> dict[str, str]:
+    """A stored contact as CSV cells; guessed / published-inbox people get search links to check by hand."""
+    from applyflow.contacts import needs_manual_check, search_links
+    linkedin, google = search_links(c["name"], company) if needs_manual_check(c["confidence"], c["name"]) else ("", "")
+    return {"name": c["name"] or "", "role": c["role"] or "", "email": c["email"], "confidence": c["confidence"],
+            "alternates": "; ".join(json.loads(c["alternates"] or "[]")),
+            "mx": "unchecked" if c["mx"] == "unchecked" else (c["mx"] or ""),
+            "linkedin_search": linkedin, "google_search": google}
 
 
 def write_contacts_csv(store, path: Path) -> Path:
@@ -107,8 +117,7 @@ def write_contacts_csv(store, path: Path) -> Path:
             }
             for i, c in enumerate(contacts[:3]):
                 prefix = "primary" if i == 0 else f"backup{i}"
-                row.update({f"{prefix}_name": c["name"] or "", f"{prefix}_role": c["role"] or "",
-                            f"{prefix}_email": c["email"], f"{prefix}_confidence": c["confidence"]})
+                row.update({f"{prefix}_{k}": v for k, v in _contact_cells(c, check["company"]).items()})
                 if i == 0:
                     row.update({"primary_source": c["source"], "primary_source_url": c["source_url"] or ""})
             writer.writerow(row)
@@ -205,9 +214,18 @@ def write_html(rows: list[Row], path: Path, stats: dict[str, object] | None = No
         if d["team_size"]:
             tags.append(f'<span class="tag">{e(d["team_size"])} people</span>')
         if contact:
+            from applyflow.contacts import needs_manual_check, search_links
             who = f'{contact["name"]} ({contact["role"]})' if contact["name"] else contact["role"]
+            mx = ", MX unchecked" if contact["mx"] == "unchecked" else ""
             tags.append(f'<span class="tag action">✉ {e(who)}: {e(contact["email"])} '
-                        f'[{e(contact["confidence"])}]</span>')
+                        f'[{e(contact["confidence"].replace("_", " "))}{mx}]</span>')
+            alternates = json.loads(contact["alternates"] or "[]")
+            if alternates:
+                tags.append(f'<span class="tag">if it bounces: {e(", ".join(alternates))}</span>')
+            if needs_manual_check(contact["confidence"], contact["name"]):
+                linkedin, google = search_links(contact["name"], contact["company"] or d["company"])
+                tags.append(f'<span class="tag"><a href="{e(linkedin)}" target="_blank" rel="noopener">LinkedIn</a>'
+                            f' · <a href="{e(google)}" target="_blank" rel="noopener">Google</a></span>')
         elif d["contact_hint"]:
             tags.append(f'<span class="tag">contact: {e(d["contact_hint"])}</span>')
         if d["lead_project"]:

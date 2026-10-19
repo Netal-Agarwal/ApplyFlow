@@ -108,9 +108,17 @@ CREATE TABLE IF NOT EXISTS contacts (
     source_url    TEXT,
     found_at      TEXT NOT NULL,
     is_primary    INTEGER NOT NULL,
-    rank          INTEGER NOT NULL
+    rank          INTEGER NOT NULL,
+    alternates    TEXT,                        -- JSON list: what to try if a guessed address bounces
+    mx            TEXT                         -- ok | unchecked (DNS lookup failed) | '' (not checked)
 );
 CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company_key);
+
+CREATE TABLE IF NOT EXISTS mx_cache (
+    domain        TEXT PRIMARY KEY,
+    status        TEXT NOT NULL,               -- ok | no_mx
+    checked_at    TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS collection_runs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,7 +149,8 @@ class Store:
         """Add columns introduced after a database was first created."""
         for table, column, decl in (("jobs", "team_size", "INTEGER"), ("scores", "contact_hint", "TEXT"),
                                      ("scores", "merged_locations", "TEXT"), ("companies", "detected_from", "TEXT"),
-                                     ("companies", "status_reason", "TEXT")):
+                                     ("companies", "status_reason", "TEXT"), ("contacts", "alternates", "TEXT"),
+                                     ("contacts", "mx", "TEXT")):
             cols = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
@@ -360,9 +369,9 @@ class Store:
             for rank, c in enumerate(result.contacts):
                 self.conn.execute(
                     "INSERT INTO contacts (company_key, company, name, role, email, confidence, source, source_url, "
-                    "found_at, is_primary, rank) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "found_at, is_primary, rank, alternates, mx) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (t.key, t.company, c.name, c.role, c.email, c.confidence, c.source, c.source_url, now,
-                     int(rank == 0), rank))
+                     int(rank == 0), rank, json.dumps(c.alternates), c.mx))
             from applyflow.contacts import result_to_json
             self.conn.execute(
                 """
@@ -377,6 +386,19 @@ class Store:
                 """,
                 (t.key, t.company, t.kind, t.domain, t.domain_source, t.team_size, json.dumps(t.roles),
                  t.best_score, t.hint, result.status, json.dumps(result_to_json(result)), now))
+
+    def get_mx(self, domain: str, days: int) -> str | None:
+        """Cached MX status (ok | no_mx) if looked up within `days`."""
+        row = self.conn.execute("SELECT status, checked_at FROM mx_cache WHERE domain = ?", (domain,)).fetchone()
+        if row is None or datetime.now(timezone.utc) - datetime.fromisoformat(row["checked_at"]) >= timedelta(days=days):
+            return None
+        return row["status"]
+
+    def save_mx(self, domain: str, status: str) -> None:
+        with self.conn:
+            self.conn.execute("INSERT INTO mx_cache (domain, status, checked_at) VALUES (?, ?, ?) "
+                              "ON CONFLICT(domain) DO UPDATE SET status=excluded.status, checked_at=excluded.checked_at",
+                              (domain, status, _now()))
 
     def contacts_checked_recently(self, company_key: str, days: int) -> bool:
         """Looked up within `days` (a missing domain doesn't count: that's cheap to retry)."""

@@ -115,6 +115,12 @@ guessed, fallback) and its source URL; the person is chosen by role fit (founder
 teams, engineering manager or recruiter at bigger ones). Mail servers are never probed and
 nothing is sent. Addresses in `config/do_not_contact.txt` (see the `.example`) are never used.
 
+Ranking puts deliverability first: verified > strong > a published inbox (founders@, careers@,
+hello@ ... at teams of 50 or fewer) > guessed. Every domain is checked for MX records (DNS over
+HTTPS, cached for 30 days) and contacts on domains that can't receive mail are dropped. Guessed
+addresses come with two alternates to try if the first bounces, plus LinkedIn and Google search
+links to check the person by hand. Companies over 300 people are apply-only.
+
 Deliberately **not** scraped: LinkedIn, Wellfound, Naukri, Instahyre. Their terms
 forbid it and they actively block scrapers.
 

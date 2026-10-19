@@ -39,6 +39,8 @@ DEFAULT_CONTACTS = {
     "recheck_days": 30,
     "max_site_pages": 5,
     "github_max_members": 10,
+    "apply_only_team_size": 300,     # bigger companies: apply via the posting, no contact search
+    "mx_cache_days": 30,
 }
 DEFAULT_DISCOVERY = {
     "recheck_days": 30,

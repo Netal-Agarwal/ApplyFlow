@@ -27,19 +27,20 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 from applyflow.config import Profile
 from applyflow.detect import normalize_website
 from applyflow.discovery import board_identity, name_key, same_site, site_domain
 from applyflow.http import FetchError
 from applyflow.models import Job
-from applyflow.scoring import MARKETPLACE_HINT, hint_for_size
+from applyflow.scoring import APPLY_ONLY_HINT, MARKETPLACE_HINT, hint_for_size
 from applyflow.text import extract_emails, html_to_text
 
 Log = Callable[[str], None]
 
-CONFIDENCE = ["verified", "strong", "guessed", "fallback"]
+# Deliverability first: an address someone published beats one we generated (Phase 2a.1).
+CONFIDENCE = ["verified", "strong", "published_inbox", "guessed", "fallback"]
 SOURCE_ORDER = ["posting", "website", "github", "yc", "pattern"]
 
 # How well each kind of contact fits who we're told to look for (0 = best).
@@ -64,12 +65,15 @@ class Contact:
     name: str
     role: str                 # title as published, or what the address is ("careers inbox")
     email: str
-    confidence: str           # verified | strong | guessed | fallback
+    confidence: str           # verified | strong | published_inbox | guessed | fallback
     source: str               # posting | website | yc | github | pattern
     source_url: str
     group: str = "other"      # posting | founder | cto | eng_lead | recruiting | hiring_inbox | general_inbox | other
     fit: int = 9
     note: str = ""
+    inbox_rank: int = 0       # among inboxes: founders@/careers@ 0, hello@/team@/hi@ 1, contact@/info@ 2
+    alternates: list[str] = field(default_factory=list)   # for guesses: what to try if the first bounces
+    mx: str = ""              # ok | unchecked ('' when no MX check ran)
 
     def label(self) -> str:
         who = f"{self.name} ({self.role})" if self.name else self.role
@@ -103,12 +107,22 @@ class Target:
     best_score: int | None = None
     jobs: list[Job] = field(default_factory=list)
     yc_slug: str = ""
+    board_size: int | None = None
+
+    @property
+    def small(self) -> bool:
+        """<=50 people (or unknown size with a small board): generic inboxes reach the founders."""
+        return self.hint in ("founder or CTO",)
+
+    @property
+    def apply_only(self) -> bool:
+        return self.hint == APPLY_ONLY_HINT
 
 
 @dataclass
 class ContactResult:
     target: Target
-    status: str                                         # found | none | no_domain
+    status: str                                         # found | none | no_domain | apply_only
     contacts: list[Contact] = field(default_factory=list)      # top 3, primary first
     considered: list[Contact] = field(default_factory=list)    # every candidate, ranked
     excluded: list[tuple[str, str]] = field(default_factory=list)   # (email, why)
@@ -137,29 +151,46 @@ def role_group(title: str) -> str:
 
 HIRING_INBOXES = {"careers", "career", "jobs", "job", "hiring", "hr", "talent", "recruiting", "recruitment",
                   "recruit", "join", "joinus", "work", "workwithus"}
-GENERAL_INBOXES = {"hello", "hi", "info", "contact", "team", "admin", "office", "mail", "enquiries", "enquiry",
-                   "inquiries", "connect", "people"}
 FOUNDER_INBOXES = {"founders", "founder"}
+# Generic inboxes that usually reach the founders at a small startup, best first.
+FOUNDER_REACHING = {"hello": 1, "team": 1, "hi": 1, "contact": 2, "info": 2}
+GENERAL_INBOXES = {"admin", "office", "mail", "enquiries", "enquiry", "inquiries", "connect", "people"}
 SKIP_LOCALS = {"noreply", "no-reply", "donotreply", "privacy", "security", "abuse", "legal", "billing", "sales",
                "press", "media", "pr", "support", "help", "helpdesk", "dpo", "gdpr", "accessibility", "compliance",
                "investors", "investor", "ir", "partners", "partnerships", "marketing", "feedback", "grievance",
                "grievances", "nodal", "cs", "customercare", "care", "service", "orders", "accounts", "finance",
-               "webmaster", "postmaster", "notifications", "bounce", "example", "name", "email", "you", "user"}
+               "webmaster", "postmaster", "notifications", "bounce", "example", "name", "email", "you", "user",
+               # tool and system addresses
+               "jira", "confluence", "git", "github", "gitlab", "slack", "alerts", "alert", "status", "ci",
+               "devops", "system", "daemon", "mailer", "unsubscribe", "newsletter"}
+
+# Tool / service words that rule an address out wherever they appear in it.
+_SKIP_ANYWHERE = ("support", "noreply", "no-reply", "donotreply", "billing", "privacy", "security", "helpdesk",
+                  "abuse", "unsubscribe", "customercare", "grievance")
 
 
-def classify_address(email: str) -> tuple[str, str, str] | None:
-    """(group, role description, confidence) for a published address, or None to ignore it."""
+def classify_address(email: str, small: bool = True) -> tuple[str, str, str, int] | None:
+    """(group, role description, confidence, inbox rank) for a published address, or None to ignore it.
+
+    At a small company (<=50 people) founders@ / hiring inboxes and hello@ / team@ / hi@ /
+    contact@ / info@ reach a founder, so they're `published_inbox`; at bigger ones they're
+    only a `fallback`.
+    """
     local = email.split("@", 1)[0].lower()
     base = re.sub(r"[._-]?\d+$", "", local)
-    if base in SKIP_LOCALS or any(part in SKIP_LOCALS for part in re.split(r"[._+-]", base)):
+    if base in SKIP_LOCALS or any(part in SKIP_LOCALS for part in re.split(r"[._+-]", base)) \
+            or any(word in base for word in _SKIP_ANYWHERE):      # "loansupport@", "customercare@"
         return None                       # also "help-events@", "support.team@"
-    if base in HIRING_INBOXES:
-        return "hiring_inbox", f"{local}@ inbox", "fallback"
+    inbox = "published_inbox" if small else "fallback"
     if base in FOUNDER_INBOXES:
-        return "founder", "founders' inbox", "fallback"
+        return "founder", "founders' inbox", inbox, 0
+    if base in HIRING_INBOXES:
+        return "hiring_inbox", f"{local}@ inbox", inbox, 0
+    if base in FOUNDER_REACHING:
+        return "general_inbox", f"{local}@ inbox", inbox, FOUNDER_REACHING[base]
     if base in GENERAL_INBOXES:
-        return "general_inbox", f"{local}@ inbox", "fallback"
-    return "other", "", "verified"
+        return "general_inbox", f"{local}@ inbox", "fallback", 3
+    return "other", "", "verified", 0
 
 
 # ---------------------------------------------------------------------------
@@ -501,24 +532,118 @@ def github_contacts(client, org: str, domain: str, budget: GitHubBudget, max_mem
 
 
 # ---------------------------------------------------------------------------
+# Does the domain accept email? (MX records via DNS-over-HTTPS; no extra dependency)
+# ---------------------------------------------------------------------------
+
+DOH_ENDPOINTS = [
+    ("https://cloudflare-dns.com/dns-query", {"Accept": "application/dns-json"}),
+    ("https://dns.google/resolve", {"Accept": "application/json"}),
+]
+
+
+def parse_doh_mx(data: dict[str, Any]) -> str:
+    """'ok' or 'no_mx' from a DNS JSON answer (Cloudflare / Google format); ValueError if DNS failed."""
+    status = data.get("Status")
+    if status == 3:                                   # NXDOMAIN: the domain doesn't exist
+        return "no_mx"
+    if status != 0:
+        raise ValueError(f"DNS status {status}")
+    records = [a for a in data.get("Answer") or [] if a.get("type") == 15]
+    real = [a for a in records if str(a.get("data", "")).split()[-1:] != ["."]]   # "0 ." is a null MX
+    return "ok" if real else "no_mx"
+
+
+class MXChecker:
+    """Looks up MX records once per domain, cached in the store for `days` (failures aren't cached)."""
+
+    def __init__(self, client, store=None, days: int = 30):
+        self.client, self.store, self.days = client, store, days
+        self.memo: dict[str, str] = {}
+        self.lookups = self.cached = self.failures = 0
+
+    def check(self, domain: str) -> str:
+        """ok | no_mx | unchecked (the DNS lookup itself failed)."""
+        domain = domain.lower()
+        if domain in self.memo:
+            return self.memo[domain]
+        cached = self.store.get_mx(domain, self.days) if self.store is not None else None
+        if cached:
+            self.cached += 1
+            self.memo[domain] = cached
+            return cached
+        for url, headers in DOH_ENDPOINTS:
+            try:
+                data, _ = self.client.get_api(url, {"name": domain, "type": "MX"}, headers)
+                status = parse_doh_mx(data)
+            except (FetchError, ValueError, AttributeError, TypeError):
+                continue
+            self.lookups += 1
+            if self.store is not None:
+                self.store.save_mx(domain, status)
+            self.memo[domain] = status
+            return status
+        self.failures += 1
+        self.memo[domain] = "unchecked"
+        return "unchecked"
+
+    def status(self) -> str:
+        return (f"MX: {self.lookups} DNS lookup(s), {self.cached} from cache, "
+                f"{self.failures} failed (contacts kept, marked MX unchecked)")
+
+
+# ---------------------------------------------------------------------------
+# Manual check links (never fetched: they're for the user to click)
+# ---------------------------------------------------------------------------
+
+def search_links(name: str, company: str) -> tuple[str, str]:
+    """(LinkedIn people search, Google search) for '<name> <company>'."""
+    return ("https://www.linkedin.com/search/results/people/?keywords=" + quote(f"{name} {company}"),
+            "https://www.google.com/search?q=" + quote(f'"{name}" {company}'))
+
+
+def needs_manual_check(confidence: str, name: str) -> bool:
+    return bool(name) and confidence in ("guessed", "published_inbox")
+
+
+# ---------------------------------------------------------------------------
 # Putting it together
 # ---------------------------------------------------------------------------
 
+FREEMAIL = {"gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.in", "outlook.com", "hotmail.com", "live.com",
+            "proton.me", "protonmail.com", "icloud.com", "me.com", "aol.com", "zoho.com", "yandex.com", "gmx.com",
+            "hey.com", "fastmail.com", "rediffmail.com"}
+
+
+def posting_email_domain(jobs: list[Job]) -> str:
+    """A company domain from the emails postings publish (not gmail.com and the like)."""
+    for job in jobs:
+        for email in job.emails:
+            domain = email.rsplit("@", 1)[-1].lower()
+            if "." in domain and domain not in FREEMAIL:
+                return domain
+    return ""
+
+
 def _rank_key(c: Contact) -> tuple:
-    return (c.fit, CONFIDENCE.index(c.confidence), SOURCE_ORDER.index(c.source), 0 if c.name else 1, c.email)
+    """Deliverability first (verified > strong > published inbox > guessed > fallback), then role fit."""
+    return (CONFIDENCE.index(c.confidence), c.fit, c.inbox_rank, SOURCE_ORDER.index(c.source),
+            0 if c.name else 1, c.email)
 
 
 def _good_enough(contacts: list[Contact]) -> bool:
     return any(c.fit == 0 and c.confidence in ("verified", "strong") for c in contacts)
 
 
+def guess_alternates(first: str, last: str, domain: str) -> list[str]:
+    """What to try if first@domain bounces: two other common patterns, when the surname is known."""
+    if len(last) < 2:                     # no surname, or only an initial ("Tanmaay K")
+        return []
+    return [f"{apply_pattern(p, first, last)}@{domain}" for p in ("first.last", "firstlast")]
+
+
 def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, github: GitHubBudget,
-                  log: Log = lambda _: None) -> ContactResult:
+                  log: Log = lambda _: None, mx: MXChecker | None = None) -> ContactResult:
     result = ContactResult(target=target, status="none")
-    if not target.domain:
-        result.status = "no_domain"
-        result.reasons.append("no website domain from discovery, seeds.yaml, the HN header or the board")
-        return result
     fit_table = ROLE_FIT.get(target.hint, ROLE_FIT["founder or CTO"])
     cands: list[Contact] = []
 
@@ -526,17 +651,36 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
         contact.fit = fit_table.get(contact.group, 4)
         cands.append(contact)
 
-    # 1. Emails the postings publish for applicants.
+    # 1. Emails the postings publish for applicants always count, domain or not.
     for job in target.jobs:
         for email in job.emails:
             add(Contact(name="", role="named in the posting for applicants", email=email.lower(),
                         confidence="verified", source="posting", source_url=job.url, group="posting"))
     if target.kind == "role":
         result.reasons.append(f"postings: {len(cands)} applicant email(s)")
+    if not target.domain and cands:
+        derived = posting_email_domain(target.jobs)
+        if derived:
+            target.domain, target.domain_source = derived, "posting email"
+            result.reasons.append(f"domain {derived} taken from the posting's email")
+
+    if target.apply_only and not cands:
+        result.status = "apply_only"
+        size = f"{target.team_size} people" if target.team_size is not None else f"{target.board_size} open roles"
+        result.reasons.append(f"big company ({size}): apply via the posting; no contact search")
+        log(f"  {target.company:<32} apply-only ({size})")
+        return result
+    if not target.domain and not cands:
+        result.status = "no_domain"
+        result.reasons.append("no website domain from discovery, seeds.yaml, the HN header, the board "
+                              "or a posting email")
+        return result
 
     people: list[Person] = []
     patterns: list[tuple[str, str, str]] = []           # (pattern, email, url)
-    if not _good_enough(cands):
+    if target.apply_only:
+        result.reasons.append("big company: only the posting's email is used")
+    elif target.domain and not _good_enough(cands):
         # 2. The company's own site.
         site = read_site(client, target.website or f"https://{target.domain}", target.domain,
                          int(profile.contacts["max_site_pages"]))
@@ -547,21 +691,22 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
             else:
                 people.append(p)
         for email, url in site.emails:
-            kind = classify_address(email)
+            kind = classify_address(email, small=target.small)
             if kind is None:
                 continue
-            group, role, confidence = kind
+            group, role, confidence, inbox_rank = kind
             local = email.split("@", 1)[0]
             owner = next((p for p in people if pattern_of(local, p.name)), None)
             if owner:
                 patterns.append((pattern_of(local, owner.name), email, url))
-                group, role = owner.group, owner.role
+                group, role, confidence = owner.group, owner.role, "verified"
             elif confidence == "verified" and not re.fullmatch(r"[a-z]{2,}[._-][a-z]{2,}", local):
-                # Not tied to a named person and not first.last-shaped: "jira@", "rahul@" - can't
-                # tell a person from a tool or team inbox, so don't call it a verified personal address.
-                confidence, role = "fallback", "unrecognised address"
+                # Not tied to a named person and not first.last-shaped: "rahul@" might be a person or
+                # a team inbox, so it's not a verified personal address.
+                confidence, role, inbox_rank = "fallback", "unrecognised address", 3
             add(Contact(name=owner.name if owner else "", role=role or "person at the company", email=email,
-                        confidence=confidence, source="website", source_url=url, group=group))
+                        confidence=confidence, source="website", source_url=url, group=group,
+                        inbox_rank=inbox_rank))
         note = f"website: read {len(site.read)} page(s), {len(site.emails)} email(s), {len(people)} named people"
         if site.blocked:
             note += f"; robots.txt disallowed {', '.join(urlparse(u).path or '/' for u in site.blocked)}"
@@ -612,31 +757,44 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
         if person.group in GUESSABLE_GROUPS and len(first) >= 2 and f"{first}@{target.domain}" not in known:
             add(Contact(name=person.name, role=person.role, email=f"{first}@{target.domain}", confidence="guessed",
                         source="pattern", source_url=person.source_url, group=person.group,
-                        note="first@domain, no pattern confirmed"))
+                        note="first@domain, no pattern confirmed",
+                        alternates=guess_alternates(first, last, target.domain)))
     if people:
         result.reasons.append("named people: " + "; ".join(f"{p.name} ({p.role}, {p.source})" for p in people))
     result.people = people
 
-    # Dedupe (best version of each address), drop the do-not-contact list, rank.
+    # Dedupe (best version of each address), drop domains without MX and the do-not-contact
+    # list, then rank.
     best: dict[str, Contact] = {}
     for c in sorted(cands, key=_rank_key):
         best.setdefault(c.email, c)
     ranked = []
+    mx_notes: dict[str, str] = {}
     for c in sorted(best.values(), key=_rank_key):
+        domain = c.email.rsplit("@", 1)[-1]
+        if mx is not None:
+            mx_status = mx.check(domain)
+            mx_notes[domain] = mx_status
+            if mx_status == "no_mx":
+                result.excluded.append((c.email, f"{domain} has no MX records (can't receive email)"))
+                continue
+            c.mx = mx_status
         blocked = dnc.blocks(c.email)
         if blocked:
             result.excluded.append((c.email, f"on the do-not-contact list ({blocked})"))
         else:
             ranked.append(c)
+    if mx_notes:
+        result.reasons.append("MX: " + ", ".join(f"{d} {s.replace('_', ' ')}" for d, s in sorted(mx_notes.items())))
     result.considered = ranked
     result.contacts = ranked[:3]
     if result.excluded:
-        result.reasons.append("do-not-contact: excluded " + ", ".join(e for e, _ in result.excluded))
+        result.reasons.append("excluded: " + ", ".join(f"{e} ({why})" for e, why in result.excluded))
     if result.contacts:
         result.status = "found"
         p = result.contacts[0]
-        result.why_primary = (f"best role fit for '{target.hint}' ({p.group}, fit {p.fit}), "
-                              f"then confidence ({p.confidence}), then source ({p.source})")
+        result.why_primary = (f"most deliverable ({p.confidence}), then best role fit for '{target.hint}' "
+                              f"({p.group}, fit {p.fit}), then source ({p.source})")
     else:
         result.reasons.append("nothing found")
     log(f"  {target.company:<32} {result.status:<9} " + (result.contacts[0].label() if result.contacts else
@@ -676,7 +834,7 @@ def build_targets(store, profile: Profile, seeds: list, client=None, log: Log = 
             target = targets[key] = Target(
                 key=key, company=row["company"], kind="role", hint=row["contact_hint"] or "founder or CTO",
                 team_size=row["team_size"] if row["team_size"] is not None else (disc["team_size"] if disc else None),
-                yc_slug=key[3:] if key.startswith("yc:") else "")
+                board_size=row["board_size"], yc_slug=key[3:] if key.startswith("yc:") else "")
             sources = [("seeds.yaml", seed_sites.get(row["board_key"] or "", "")),
                        ("discovery", disc["website"] if disc else "")]
             job = store.get_job(row["id"])
@@ -697,6 +855,11 @@ def build_targets(store, profile: Profile, seeds: list, client=None, log: Log = 
             target.jobs.append(job)
         target.roles.append(f"{row['title']} ({row['score']})")
         target.best_score = max(target.best_score or 0, row["score"])
+    for target in targets.values():
+        if not target.domain:            # nothing else gave one: the domain of a posting's email
+            derived = posting_email_domain(target.jobs)
+            if derived:
+                target.website, target.domain, target.domain_source = f"https://{derived}", derived, "posting email"
     for row in store.companies_without_board():
         if row["key"] in targets or "india" not in (row["locations"] or "").lower():
             continue

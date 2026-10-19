@@ -113,7 +113,7 @@ def cmd_discover(args, profile, store) -> int:
 
 
 def cmd_contacts(args, profile, store) -> int:
-    from applyflow.contacts import DoNotContact, GitHubBudget, build_targets, find_contacts
+    from applyflow.contacts import DoNotContact, GitHubBudget, MXChecker, build_targets, find_contacts
     from applyflow.discovery import name_key
     client = _client(profile, args.min_interval)
     targets = build_targets(store, profile, config.load_seeds(args.seeds), client)
@@ -125,6 +125,7 @@ def cmd_contacts(args, profile, store) -> int:
             return 1
     dnc = DoNotContact.load(config.DO_NOT_CONTACT_PATH)
     github = GitHubBudget()
+    mx = MXChecker(client, store, int(profile.contacts["mx_cache_days"]))
     days = int(profile.contacts["recheck_days"])
     roles = sum(t.kind == "role" for t in targets)
     print(f"Finding contacts for {len(targets)} targets ({roles} with A/B roles, {len(targets) - roles} general "
@@ -134,13 +135,13 @@ def cmd_contacts(args, profile, store) -> int:
         if not args.force and store.contacts_checked_recently(target.key, days):
             skipped += 1
             continue
-        result = find_contacts(client, target, profile, dnc, github, log=print)
+        result = find_contacts(client, target, profile, dnc, github, log=print, mx=mx)
         store.save_contact_result(result)
         done += 1
     counts = store.contact_counts()
-    print(f"\nLooked up {done}, skipped {skipped} checked recently. {github.status()}.")
+    print(f"\nLooked up {done}, skipped {skipped} checked recently. {github.status()}. {mx.status()}.")
     print("Primary contacts by confidence: " + ", ".join(
-        f"{k}={counts.get(k, 0)}" for k in ("verified", "strong", "guessed", "fallback", "none", "no_domain")))
+        f"{k}={counts.get(k, 0)}" for k in ("verified", "strong", "published_inbox", "guessed", "fallback", "none", "apply_only", "no_domain")))
     print(f"Written: {write_contacts_csv(store, Path(args.out) / 'contacts.csv')}")
     return 0
 
@@ -174,9 +175,12 @@ def cmd_explain_contact(args, profile, store) -> int:
     for i, c in enumerate(details.get("considered", [])):
         mark = "PRIMARY" if i == 0 else ("backup " if i < 3 else "       ")
         who = f"{c['name']} - {c['role']}" if c["name"] else c["role"]
-        print(f"  {mark} fit {c['fit']}  {c['confidence']:<8} {c['email']:<38} {who} "
-              f"[{c['source']}] {c['note']}".rstrip())
+        mx = " (MX unchecked)" if c.get("mx") == "unchecked" else ""
+        print(f"  {mark} {c['confidence']:<15} fit {c['fit']}  {c['email']:<38} {who} "
+              f"[{c['source']}]{mx} {c['note']}".rstrip())
         print(f"           {c['source_url']}")
+        if c.get("alternates"):
+            print(f"           if it bounces, try: {', '.join(c['alternates'])}")
     for email, why in details.get("excluded", []):
         print(f"  EXCLUDED {email}: {why}")
     if details.get("why_primary"):
@@ -219,7 +223,7 @@ def cmd_stats(args, profile, store) -> int:
     if s.get("contacts"):
         c = s["contacts"]
         print(f"\nContacts: {sum(c.values())} companies looked up; primary contact " + ", ".join(
-            f"{k}={c.get(k, 0)}" for k in ("verified", "strong", "guessed", "fallback", "none", "no_domain")))
+            f"{k}={c.get(k, 0)}" for k in ("verified", "strong", "published_inbox", "guessed", "fallback", "none", "apply_only", "no_domain")))
     if s["failed_boards"]:
         print("\nBoards failing on their latest run:")
         for board, err in s["failed_boards"]:

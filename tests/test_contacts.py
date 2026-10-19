@@ -80,9 +80,9 @@ def target(hint="founder or CTO", domain="acmerobotics.example", website=ACME, *
                   kind=kw.pop("kind", "role"), hint=hint, website=website, domain=domain, **kw)
 
 
-def run(t, routes=None, dnc=None, github=None, profile=None):
+def run(t, routes=None, dnc=None, github=None, profile=None, mx=None):
     c, session = client(routes if routes is not None else acme_routes())
-    result = find_contacts(c, t, profile or example_profile(), dnc or DoNotContact(), github or GitHubBudget())
+    result = find_contacts(c, t, profile or example_profile(), dnc or DoNotContact(), github or GitHubBudget(), mx=mx)
     return result, session
 
 
@@ -99,36 +99,46 @@ class ConfidenceLevelTests(unittest.TestCase):
     def test_strong_from_confirmed_pattern(self):
         # priya.sharma@ is published for "Priya Sharma" -> first.last applied to the CTO named on /about.
         result, _ = run(target())
-        p = result.contacts[0]
-        self.assertEqual((p.name, p.role, p.email, p.confidence, p.source),
-                         ("Arjun Mehta", "Co-founder & CTO", "arjun.mehta@acmerobotics.example", "strong", "pattern"))
-        self.assertEqual(p.note, "pattern first.last confirmed by priya.sharma@acmerobotics.example")
-        self.assertEqual([c.email for c in result.contacts],
-                         ["arjun.mehta@acmerobotics.example", "rahul.verma@acmerobotics.example",
-                          "priya.sharma@acmerobotics.example"])
-        self.assertEqual(result.contacts[2].confidence, "verified")
+        arjun = next(c for c in result.considered if c.name == "Arjun Mehta")
+        self.assertEqual((arjun.role, arjun.email, arjun.confidence, arjun.source),
+                         ("Co-founder & CTO", "arjun.mehta@acmerobotics.example", "strong", "pattern"))
+        self.assertEqual(arjun.note, "pattern first.last confirmed by priya.sharma@acmerobotics.example")
+        self.assertEqual(arjun.alternates, [])                  # alternates are only for guesses
+        # Deliverability first: the published (verified) addresses rank above the pattern ones.
+        self.assertEqual([(c.email, c.confidence) for c in result.contacts],
+                         [("priya.sharma@acmerobotics.example", "verified"),
+                          ("kiran@acmerobotics.example", "verified"),
+                          ("arjun.mehta@acmerobotics.example", "strong")])
 
     def test_guessed_when_no_pattern_is_confirmed(self):
         routes = {"https://betaledger.example": text("beta_home.html"),
                   "https://betaledger.example/company": text("beta_company.html")}
         result, _ = run(target(domain="betaledger.example", website="https://betaledger.example"), routes)
+        # A published hiring inbox beats a guess; the guess stays as a backup with alternates (fix 4).
         self.assertEqual([(c.name, c.email, c.confidence) for c in result.contacts],
-                         [("Neha Gupta", "neha@betaledger.example", "guessed"),
-                          ("", "jobs@betaledger.example", "fallback")])
+                         [("", "jobs@betaledger.example", "published_inbox"),
+                          ("Neha Gupta", "neha@betaledger.example", "guessed")])
+        self.assertEqual(result.contacts[1].alternates,
+                         ["neha.gupta@betaledger.example", "nehagupta@betaledger.example"])
 
-    def test_fallback_hiring_inbox(self):
+    def test_published_inbox_at_small_company_fallback_at_bigger(self):
         routes = {"https://gammahealth.example": text("gamma_home.html")}
-        result, _ = run(target(domain="gammahealth.example", website="https://gammahealth.example"), routes)
-        self.assertEqual([(c.email, c.confidence) for c in result.contacts],
-                         [("careers@gammahealth.example", "fallback"), ("hello@gammahealth.example", "fallback")])
+        small, _ = run(target(domain="gammahealth.example", website="https://gammahealth.example"), routes)
+        self.assertEqual([(c.email, c.confidence) for c in small.contacts],
+                         [("careers@gammahealth.example", "published_inbox"),
+                          ("hello@gammahealth.example", "published_inbox")])
+        mid, _ = run(target(hint="engineering manager or tech lead", domain="gammahealth.example",
+                            website="https://gammahealth.example"), routes)
+        self.assertEqual({c.confidence for c in mid.contacts}, {"fallback"})
 
     def test_unrecognised_address_is_only_a_fallback(self):
         routes = {"https://tools.example": "<p>Bugs: <a href='mailto:jira@tools.example'>jira@tools.example</a>. "
-                                           "Ops: anita.rao@tools.example</p>"}
+                                           "Ops: anita.rao@tools.example. Ping rahul@tools.example. "
+                                           "noreply@tools.example, help-desk@tools.example, billing@tools.example</p>"}
         result, _ = run(target(domain="tools.example", website="https://tools.example"), routes)
         got = {c.email: (c.confidence, c.role) for c in result.considered}
-        self.assertEqual(got["jira@tools.example"], ("fallback", "unrecognised address"))
-        self.assertEqual(got["anita.rao@tools.example"], ("verified", "person at the company"))
+        self.assertEqual(got, {"anita.rao@tools.example": ("verified", "person at the company"),
+                               "rahul@tools.example": ("fallback", "unrecognised address")})   # tool addresses out
 
     def test_none_lists_what_was_tried(self):
         routes = {"https://empty.example": "<html><body><p>Coming soon.</p></body></html>"}
@@ -192,14 +202,18 @@ class SiteTests(unittest.TestCase):
 
 
 class RoleRankingTests(unittest.TestCase):
-    def test_primary_follows_contact_hint(self):
-        small, _ = run(target(hint="founder or CTO"))
-        mid, session = run(target(hint="engineering manager or tech lead"))
-        large, _ = run(target(hint="recruiter or engineering manager"))
-        self.assertEqual(small.contacts[0].name, "Arjun Mehta")                     # CTO
-        self.assertEqual((mid.contacts[0].name, mid.contacts[0].confidence), ("Priya Sharma", "verified"))
-        self.assertEqual((large.contacts[0].name, large.contacts[0].role), ("Sana Khan", "Talent Acquisition Lead"))
-        self.assertIn("best role fit for 'founder or CTO'", small.why_primary)
+    def test_role_fit_orders_contacts_within_a_confidence_level(self):
+        def strong(hint):
+            result, session = run(target(hint=hint))
+            return [c.name for c in result.considered if c.confidence == "strong"], result, session
+        small, result, _ = strong("founder or CTO")
+        mid, mid_result, session = strong("engineering manager or tech lead")
+        large, _, _ = strong("recruiter or engineering manager")
+        self.assertEqual(small, ["Arjun Mehta", "Rahul Verma", "Sana Khan"])      # CTO, CEO first
+        self.assertEqual(mid, ["Arjun Mehta", "Rahul Verma", "Sana Khan"])        # CTO (fit 0) before CEO (1)
+        self.assertEqual(large, ["Sana Khan", "Arjun Mehta", "Rahul Verma"])      # recruiter first
+        self.assertEqual(mid_result.contacts[0].name, "Priya Sharma")             # verified beats strong
+        self.assertIn("most deliverable (verified), then best role fit for 'founder or CTO'", result.why_primary)
         # The EM was found verified on the site, so GitHub wasn't needed.
         self.assertFalse(any(u.startswith(GH) for u in session.urls))
 
@@ -207,6 +221,9 @@ class RoleRankingTests(unittest.TestCase):
         result, _ = run(target(hint="engineering manager or tech lead"))
         fit0 = [(c.name, c.confidence) for c in result.considered if c.fit == 0]
         self.assertEqual(fit0, [("Priya Sharma", "verified"), ("Arjun Mehta", "strong")])
+        ranks = [c.confidence for c in result.considered]
+        order = ["verified", "strong", "published_inbox", "guessed", "fallback"]
+        self.assertEqual(ranks, sorted(ranks, key=order.index))
 
     def test_keeps_top_three(self):
         result, _ = run(target())
@@ -226,11 +243,12 @@ class YCPageTests(unittest.TestCase):
     def test_founders_from_yc_page(self):
         result, _ = run(self.gamma(), self.routes("yc_robots.txt"))
         self.assertIn("YC page: 2 founder(s)", result.reasons)
-        self.assertEqual([(c.name, c.email, c.confidence, c.source_url) for c in result.contacts[:2]],
-                         [("Kabir Rao", "kabir@gammahealth.example", "guessed",
-                           "https://www.ycombinator.com/companies/gamma-health"),
-                          ("Meera Iyer", "meera@gammahealth.example", "guessed",
+        guessed = [c for c in result.considered if c.confidence == "guessed"]
+        self.assertEqual([(c.name, c.email, c.source_url) for c in guessed],
+                         [("Kabir Rao", "kabir@gammahealth.example", "https://www.ycombinator.com/companies/gamma-health"),
+                          ("Meera Iyer", "meera@gammahealth.example",
                            "https://www.ycombinator.com/companies/gamma-health")])
+        self.assertEqual(result.contacts[0].email, "careers@gammahealth.example")    # published inbox first
 
     def test_skipped_when_robots_disallows(self):
         result, session = run(self.gamma(), self.routes("yc_robots_disallow.txt"))
@@ -263,7 +281,7 @@ class GitHubTests(unittest.TestCase):
         # A second company in the same run doesn't call GitHub again before the reset.
         again, session2 = run(target(), routes, github=budget)
         self.assertFalse(any(u.startswith(GH) for u in session2.urls))
-        self.assertEqual(again.contacts[0].name, "Arjun Mehta")       # other sources still work
+        self.assertEqual(again.contacts[0].name, "Priya Sharma")      # other sources still work
 
 
 class DoNotContactTests(unittest.TestCase):
@@ -274,7 +292,7 @@ class DoNotContactTests(unittest.TestCase):
             dnc = DoNotContact.load(path)
         result, _ = run(target(), dnc=dnc)
         self.assertNotIn("arjun.mehta@acmerobotics.example", [c.email for c in result.considered])
-        self.assertEqual(result.contacts[0].name, "Rahul Verma")
+        self.assertEqual([c.name for c in result.considered if c.confidence == "strong"][0], "Rahul Verma")
         self.assertEqual(result.excluded, [("arjun.mehta@acmerobotics.example",
                                             "on the do-not-contact list (arjun.mehta@acmerobotics.example)")])
         gamma, _ = run(target(domain="gammahealth.example", website="https://gammahealth.example"),
@@ -379,7 +397,7 @@ class StorageTests(unittest.TestCase):
         self.store.save_contact_result(result)
         rows = self.store.contacts_for("yc:acme-robotics")
         self.assertEqual([(r["rank"], r["is_primary"]) for r in rows], [(0, 1), (1, 0), (2, 0)])
-        self.assertEqual(self.store.contact_counts(), {"strong": 1})
+        self.assertEqual(self.store.contact_counts(), {"verified": 1})
         with tempfile.TemporaryDirectory() as tmp:
             path = write_contacts_csv(self.store, Path(tmp) / "contacts.csv")
             with open(path, encoding="utf-8") as fh:
@@ -387,7 +405,7 @@ class StorageTests(unittest.TestCase):
         self.assertEqual((row["target_type"], row["company"], row["domain"], row["roles"], row["primary_name"],
                           row["primary_confidence"], row["backup1_name"], row["backup2_email"]),
                          ("role", "Acme Robotics", "acmerobotics.example", "Backend Engineer Intern (82)",
-                          "Arjun Mehta", "strong", "Rahul Verma", "priya.sharma@acmerobotics.example"))
+                          "Priya Sharma", "verified", "Kiran Rao", "arjun.mehta@acmerobotics.example"))
 
     def test_explain_contact_command(self):
         from applyflow.cli import main
@@ -402,8 +420,9 @@ class StorageTests(unittest.TestCase):
                 code = main(["--db", str(db), "--profile", str(PROFILE_EXAMPLE_PATH), "explain-contact", "Acme"])
         text_out = out.getvalue()
         self.assertEqual(code, 0)
-        self.assertIn("PRIMARY fit 0  strong   arjun.mehta@acmerobotics.example", text_out)
-        self.assertIn("Why the primary won: best role fit for 'founder or CTO'", text_out)
+        primary_line = text_out.split("PRIMARY", 1)[1].split("\n", 1)[0]
+        self.assertIn("priya.sharma@acmerobotics.example", primary_line)
+        self.assertIn("Why the primary won: most deliverable (verified)", text_out)
 
 
 class CandidateDetailsTests(unittest.TestCase):
