@@ -19,6 +19,7 @@
     python -m applyflow mark-bounced <id>   # record a bounce; the next address is suggested
     python -m applyflow add-target "Co" --website co.com   # a target of your own
     python -m applyflow pool             # Phase 2c: every source -> scored pool, top ~400 selected
+    python -m applyflow pool --reselect  # 2c.1: apply large-company / tech-fit rules offline, refill
     python -m applyflow contacts --limit 50   # contacts in resumable batches, with an ETA
     python -m applyflow verify-sources   # every published address must appear on the company's site
 
@@ -201,10 +202,21 @@ def _mmss(seconds: float) -> str:
 
 def cmd_pool(args, profile, store) -> int:
     from applyflow.outreach import parse_day
-    from applyflow.pool import build_pool, rescore
+    from applyflow.pool import build_pool, rescore, reselect
     from applyflow.report import write_pool_csv
     day = parse_day(args.date)
-    if args.rescore:
+    if args.reselect:
+        scored, changes = reselect(store, profile, day)
+        dropped = [c for c in changes if c.was_selected]
+        added = [c for c in changes if not c.was_selected]
+        print(f"Re-selected under the current rules (offline): {len(dropped)} dropped, {len(added)} added.")
+        for c in dropped:
+            print(f"  - {c.company.name:<30} {c.now.why_selected}")
+        for c in added:
+            print(f"  + {c.company.name:<30} {c.now.score:>3}  {c.company.region:<13} {c.now.why_selected}")
+        if added:
+            print("Run `contacts --limit 50` for the new targets, then `draft-pack`.")
+    elif args.rescore:
         scored = rescore(store, profile, day)
         print(f"Re-scored {len(scored)} pool companies (selection kept).")
     else:
@@ -566,6 +578,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("pool", help="Phase 2c: collect companies from every source, score hiring likelihood, select ~400")
     p.add_argument("--rescore", action="store_true", help="score the stored pool again without fetching")
+    p.add_argument("--reselect", action="store_true",
+                   help="2c.1: re-score and re-select the stored pool under the current rules (large companies, "
+                        "tech-fit floor), refilling dropped slots; queued / sent / locked targets are kept")
     p.add_argument("--date", help="score as of this day (YYYY-MM-DD, default today)")
     p.add_argument("--out", default=str(config.OUTPUT_DIR))
     p.set_defaults(func=cmd_pool)

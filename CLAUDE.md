@@ -28,6 +28,7 @@ decision-maker. Big companies are kept but mostly filter out (senior roles).
    - **2b drafts & send-ready report - done (2026-10-19)**, see "Phase 2b notes" and
      `tests/test_drafting.py`. An LLM is allowed for research/drafting, never for sending decisions.
    - **2c outreach pool at scale - done (2026-10-20)**, see "Phase 2c notes" and `tests/test_pool_2c.py`.
+   - **2c.1 quality cleanup - done (2026-10-20)**, see "Phase 2c.1 notes" and `tests/test_pool_2c1.py`.
 3. Sending & follow-ups: Gmail API (OAuth) from the user's **personal Gmail**.
    Ramp from ~10-15/day to 30-40/day max. Randomized gaps, business hours in the
    recipient's timezone, no open-tracking pixels, resume linked (attached only for recruiters/HR or
@@ -78,6 +79,7 @@ python -m applyflow queue --date YYYY-MM-DD   # the day's batch (stored); report
 python -m applyflow mark-sent <id> | --batch YYYY-MM-DD ; mark-bounced <id>
 python -m applyflow add-target "Co" --website co.com [--note] [--email] [--name] [--role]
 python -m applyflow pool [--rescore]   # 2c: every source -> deduped pool, hiring-likelihood score, top ~400
+python -m applyflow pool --reselect    # 2c.1: re-apply large-company / tech-fit rules offline, refill dropped slots
 python -m applyflow contacts --limit 50 [--retry-unread]   # resumable batches with an ETA
 python -m applyflow verify-sources     # every published address must appear on the company's own site
 pytest
@@ -254,6 +256,45 @@ Open points for Phase 3 / later:
    inflates the pool; consider dropping it or requiring a working homepage.
 4. **88 targets have no contact** (30 sites unreadable: robots.txt, 403, down). They need a manual look or drop.
 5. Tier 3 (169 guessed) is still behind the gate; at 20/day the T1-2 supply (140) lasts about 11 days.
+
+## Phase 2c.1 notes (quality cleanup, 2026-10-20)
+
+- **Large companies** (`pool.large_reason`): unknown team size + a round of `pool.large_company.min_series` (C) or
+  later (`late_round`: "Pre-Series C" isn't late) or one round >= `min_amount_mn` ($50 Mn), or a profile-level
+  `never_cold_email` match (names or domains, any size; starts with Darwinbox) -> large: not selected, hint
+  "apply via posting", and `build_items` gives an already looked-up target status `apply_only`. Fixed a 2c bug:
+  `_amount_mn` read "$250K" as $250 Mn, so 49 seed-stage companies were wrongly "likely 300+" (18 now selected).
+- **Product fit** (`pool.product_fit`, non-YC pool companies only): an investment-firm name (Capital / Ventures /
+  Partners ...) with investing words on the site, or a `non_software` phrase (biofuel, solar, hardware, logistics,
+  fleet, wholesale, nbfc, wealth managers, services company, consulting, construction, hydrogen, synthetic biology,
+  ...) in the name / sector / one-liner / homepage fails unless the homepage or one-liner has a `software_product`
+  phrase (saas, api, sdk, dashboard, no-code, book a demo, integrate, ...). Funding-news-only companies must also
+  reach `funding_only_min_tech` (20) tech-fit points; an Inc42 software subsector (Application Layer, Horizontal
+  SaaS, Fintech SaaS, Investment Tech, Digital Learning Platform, ...) counts as one more product word. Lists and
+  thresholds in `DEFAULT_POOL` (config.py), overridable in profile.yaml `pool:`.
+- **Re-selection** (`pool --reselect`, offline): already looked-up general-outreach targets stay in only while they
+  pass; **protected** targets (`store.protected_target_ids`: any send_queue row, sent/bounced event, or draft_rules
+  lock) are never dropped. Slots refill by hiring likelihood; ties go YC > portfolio > funding > list (`rank_key`),
+  so refills don't pick 2014-era Bangalore-list names by alphabet. Dropped pool targets get status `dropped`
+  (never queued; the report tag's tooltip shows why). Homepages only arrive with `contacts`, so loop
+  `contacts --limit 50` -> `pool --reselect` until "0 dropped" (took 6 passes).
+- Bug-report inboxes (reportbug@, bugs@, bugreport-*) are tool addresses now (M2P had reportbug@ as its contact).
+- Live 2026-10-20: 69 net dropped from the 2c selection (42 non-software, 25 funding-only below the floor, 1
+  investment firm, Darwinbox), 69 refilled (all India; remote-global stays at the 80 cap); 391 pool + role/manual
+  targets. Of the 2026-10-22 preview's named companies, BiofuelCircle, Oorjaa, Ecofy, Nexedge Capital, Aeron
+  Systems, Hang Ten, Fairdeal.Market are dropped; Innefu and Kapture CX kept. Ready 306 (T1 33, T2 96, T3 177).
+  Drafts: 194 Claude-written (75 new via `output/drafts/drafts_2c1.py` + `write_2c1.py`: 25 new tier 1-2 targets
+  and the top 50 tier 3), 287 template; all written drafts of ready targets pass (23 failing belong to dropped /
+  apply-only targets). The 2026-10-21 stored batch (10) and its 2b-locked drafts were not touched.
+
+Open points:
+1. **The India pool past rank ~180 is thin**: refills at score 34 are portfolio companies with no one-liner and
+   unknown size (some still weak: Cancer Clinic, Pepper Farms, The Wedding Company). A size source and a second
+   funding feed would help more than further keyword tuning.
+2. **Keyword product fit is coarse**: Detect (industrial CV software, "hardware" in its one-liner) and Rovia-style
+   consumer fintech apps are borderline. Override by hand with `never_cold_email` or by editing the lists.
+3. Tier 1 shrank from 50 to 33 (most dropped preview companies were careers@ inboxes); T1-2 supply is ~129, about
+   6-7 days at 20/day before tier 3 must be open.
 
 ## Calibration backlog
 

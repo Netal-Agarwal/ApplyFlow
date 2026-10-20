@@ -1,0 +1,28 @@
+{
+  "_comment": "Homepage context (company_context: title, meta description, snippet) as `contacts` / `draft-pack` store it. Mirrors real 2026-10 pages: an investment firm, a hardware maker, a hardware maker that sells a SaaS dashboard, a logistics operator, and a SaaS company.",
+  "pool:redwood.capital": {
+    "homepage_title": "Wealth Management in India | Investment Advisory | Redwood Capital",
+    "meta_description": "Redwood Capital's wealth management, investment advisory, estate planning and family office solutions for business families in India.",
+    "snippet": "We serve a select circle of entrepreneurs and institutional investors. Our wealth preservation strategies have protected and grown generational assets."
+  },
+  "pool:gyronav.example": {
+    "homepage_title": "GyroNav | Inertial Navigation | Weather Monitoring",
+    "meta_description": "GyroNav makes inertial navigation (INS, AHRS, IMU) for defence and Class A solar weather stations.",
+    "snippet": "Products Solutions Industries Company Contact\nNavigation for defence and aerospace. Class A weather stations for solar plants."
+  },
+  "pool:sensorly.example": {
+    "homepage_title": "Sensorly - Industrial sensors with a SaaS dashboard",
+    "meta_description": "Hardware sensors for factories, with a SaaS dashboard and open APIs your team can build on.",
+    "snippet": "Book a demo. Our hardware streams readings to the Sensorly dashboard; integrate them with your ERP through our API."
+  },
+  "pool:roadrunner.example": {
+    "homepage_title": "Roadrunner | Intra-city logistics",
+    "meta_description": "Optimize routing, fleet allocation and delivery visibility with Roadrunner's AI-powered logistics platform.",
+    "snippet": "Roadrunner moves goods within cities for quick commerce and 3PL companies with the help of local fleet operators."
+  },
+  "pool:ledgerapi.example": {
+    "homepage_title": "LedgerAPI - Reconciliation APIs for finance teams",
+    "meta_description": "SaaS reconciliation and payments APIs for finance teams. Start for free.",
+    "snippet": "Developers ship reconciliation in a day with our SDK and REST API."
+  }
+}

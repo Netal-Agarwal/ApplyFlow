@@ -166,11 +166,11 @@ SKIP_LOCALS = {"noreply", "no-reply", "donotreply", "privacy", "security", "abus
                "webmaster", "postmaster", "notifications", "bounce", "example", "name", "email", "you", "user",
                # tool and system addresses
                "jira", "confluence", "git", "github", "gitlab", "slack", "alerts", "alert", "status", "ci",
-               "devops", "system", "daemon", "mailer", "unsubscribe", "newsletter"}
+               "devops", "system", "daemon", "mailer", "unsubscribe", "newsletter", "bug", "bugs"}
 
 # Tool / service words that rule an address out wherever they appear in it.
 _SKIP_ANYWHERE = ("support", "noreply", "no-reply", "donotreply", "billing", "privacy", "security", "helpdesk",
-                  "abuse", "unsubscribe", "customercare", "grievance")
+                  "abuse", "unsubscribe", "customercare", "grievance", "reportbug", "bugreport")
 
 
 def classify_address(email: str, small: bool = True) -> tuple[str, str, str, int] | None:

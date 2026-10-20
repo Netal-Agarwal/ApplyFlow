@@ -101,6 +101,41 @@ DEFAULT_POOL = {                       # Phase 2c: the ranked pool of companies 
                  "travel agency", "wedding", "snacks", "dairy", "ecommerce brand", "consumer brand", "nutrition"],
     "cities": ["bangalore", "bengaluru", "hyderabad", "delhi", "new delhi", "gurgaon", "gurugram", "noida",
                "ncr", "delhi ncr"],
+    # Phase 2c.1: an unknown-size company is large (apply-only, never cold-emailed) after a round of
+    # `min_series` or later, or one round of `min_amount_mn` ($ Mn) or more.
+    "large_company": {"min_series": "C", "min_amount_mn": 50},
+    # Phase 2c.1: a company found only in funding news needs at least this many tech-fit points
+    # (weights.tech_high = 20: two or more product words; tech_mid = 10: one).
+    "funding_only_min_tech": 20,
+    # ... where an Inc42 subsector naming a software product counts as one more product word.
+    "software_sectors": ["application layer", "aplication layer", "ai infrastructure & development", "horizontal saas",
+                         "vertical saas", "fintech saas", "logistic saas", "logistics saas", "ecommerce enablers",
+                         "investment tech", "invest tech", "wealth tech", "wealthtech", "insurtech", "lending tech",
+                         "digital learning platform", "social networking platform"],
+    # Phase 2c.1: not software-product businesses. A non-YC pool company matching one of these (name, sector,
+    # one-liner or its own homepage) is dropped unless its homepage names a software product
+    # (`software_product`, at least `software_product_min` of them; the source's one-liner counts too).
+    "non_software": ["biofuel", "biofuels", "solar", "renewable energy", "clean energy", "energy storage",
+                     "battery manufacturing", "ev charging", "hardware", "manufacturer", "manufacturers",
+                     "manufacturing", "inertial navigation", "defence", "aerospace", "drone", "drones",
+                     "logistics", "fleet", "freight", "trucking", "warehousing", "last-mile", "wholesale",
+                     "fmcg", "kirana", "d2c", "nbfc", "green finance", "wealth managers", "mutual fund distributor",
+                     "investment advisory",
+                     "family office", "asset management", "portfolio management", "services company",
+                     "it services", "ai services", "consulting", "staffing", "real estate", "construction",
+                     "agri inputs", "farm produce", "textiles", "hydrogen", "electrolyzer", "electrolyzers",
+                     "synthetic biology", "fermentation", "digital content house", "digital entertainment company",
+                     "deliver medicines"],
+    "software_product": ["saas", "api", "apis", "sdk", "developers", "developer platform", "no code", "no-code",
+                         "low-code", "open source", "dashboard", "ai agents", "build agents",
+                         "software platform", "cloud platform", "analytics platform", "data platform",
+                         "workflow automation", "self-serve", "free trial", "start for free", "book a demo",
+                         "request a demo", "personalized demo", "integrate", "automate", "project management software"],
+    "software_product_min": 1,
+    # Investment firms: a name like this plus investing words on the site.
+    "investment_name": ["capital", "ventures", "partners", "investments", "holdings", "asset", "wealth"],
+    "investment_words": ["invest", "investing", "investment", "investors", "portfolio", "wealth", "fund",
+                         "funds", "advisory", "assets under management"],
 }
 
 
@@ -134,6 +169,7 @@ class Profile:
     a_tier_tracks: list[str] = field(default_factory=lambda: ["internship", "new_grad"])
     fresher_skill_floor: int = 25          # min skill points (of 50); 0 turns the floor off
     recruiting_marketplaces: list[str] = field(default_factory=lambda: ["Weekday"])
+    never_cold_email: list[str] = field(default_factory=list)    # 2c.1: names / domains, apply-only always
     contacts: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_CONTACTS))
     discovery: dict[str, Any] = field(default_factory=dict)
     outreach: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_OUTREACH))
@@ -198,6 +234,7 @@ def parse_profile(data: dict[str, Any], source_path: Path = PROFILE_PATH) -> Pro
         a_tier_tracks=list(data.get("a_tier_tracks") or ["internship", "new_grad"]),
         fresher_skill_floor=int(data.get("fresher_skill_floor", 25)),
         recruiting_marketplaces=[str(x) for x in data.get("recruiting_marketplaces", ["Weekday"]) or []],
+        never_cold_email=[str(x) for x in data.get("never_cold_email") or []],
         contacts={**DEFAULT_CONTACTS, **(data.get("contacts") or {})},
         discovery={**DEFAULT_DISCOVERY, **(data.get("discovery") or {})},
         outreach=_outreach(data.get("outreach") or {}),
@@ -215,6 +252,7 @@ def _outreach(raw: dict[str, Any]) -> dict[str, Any]:
 def _pool(raw: dict[str, Any]) -> dict[str, Any]:
     out = {**DEFAULT_POOL, **raw}
     out["weights"] = {**DEFAULT_POOL["weights"], **(raw.get("weights") or {})}
+    out["large_company"] = {**DEFAULT_POOL["large_company"], **(raw.get("large_company") or {})}
     return out
 
 

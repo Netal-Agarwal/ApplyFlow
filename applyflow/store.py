@@ -692,6 +692,20 @@ class Store:
                 self.conn.execute("INSERT INTO funding_lookups (name_key, website, checked_at) VALUES (?, ?, ?) "
                                   "ON CONFLICT(name_key) DO NOTHING", (k, site, now))
 
+    def protected_target_ids(self) -> set[str]:
+        """2c.1: target ids that pool clean-ups never touch - queued on any day, sent / bounced, or held to
+        an older draft rule set (already scheduled in Gmail)."""
+        out: set[str] = set()
+        for sql in ("SELECT target_id FROM send_queue", "SELECT target_id FROM outreach_events",
+                    "SELECT target_id FROM draft_rules"):
+            out.update(r[0] for r in self.conn.execute(sql))
+        return out
+
+    def site_texts(self) -> dict[str, str]:
+        """company_key -> homepage title + meta description + snippet: the company's own words (2c.1)."""
+        return {r["company_key"]: " ".join(x or "" for x in (r["homepage_title"], r["meta_description"], r["snippet"]))
+                for r in self.conn.execute("SELECT * FROM company_context WHERE status = 'ok'")}
+
     def context_texts(self) -> dict[str, str]:
         """company_key -> homepage title + meta description (fetched context), for tech fit."""
         return {r["company_key"]: f"{r['homepage_title'] or ''} {r['meta_description'] or ''}"

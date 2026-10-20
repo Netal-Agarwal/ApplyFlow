@@ -260,7 +260,7 @@ class ScoreTests(unittest.TestCase):
 
     def test_late_stage_round_without_headcount_counts_as_big(self):
         late = self.score(company("Z", funding=funded("2026-09-01", "Series D")))[1]
-        self.assertIn("+0 team size unknown, but late-stage round (Series D), likely 300+ people", late)
+        self.assertIn("+0 team size unknown, but Series D round with no headcount (Series C+), likely 300+ people", late)
         cs = [Scored(company("Z", funding=funded("2026-09-01", "Series D")), 90, []),
               Scored(company("Huge", funding=[FundingRound(company="Huge", round="", amount="$120 Mn",
                                                            date="2026-09-01", source_url="u")]), 90, []),

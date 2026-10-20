@@ -45,29 +45,117 @@ class Scored:
     why_selected: str = ""
 
 
-_LATE_ROUND = re.compile(r"\bseries [c-z]\b|pre-?ipo|\bipo\b|growth|late stage", re.I)
+_SERIES = re.compile(r"(?<![a-z])(pre[- ]?)?series[- ]?([a-z])\b", re.I)
+_LATE_WORDS = re.compile(r"pre-?ipo|\bipo\b|growth|late[- ]stage", re.I)
 
 
 def _amount_mn(amount: str) -> float:
-    """'$12 Mn' -> 12.0, '$1.2 Bn' -> 1200.0; 0 when unreadable (INR amounts aren't converted)."""
-    m = re.search(r"\$\s*([\d.]+)\s*(mn|m|million|bn|b|billion)?", amount or "", re.I)
+    """'$12 Mn' -> 12.0, '$1.2 Bn' -> 1200.0, '$250K' -> 0.25; 0 when unreadable (INR amounts aren't converted)."""
+    m = re.search(r"\$\s*([\d.,]+)\s*(mn|million|m|bn|billion|b|k|thousand)?\b", amount or "", re.I)
     if not m:
         return 0.0
-    value = float(m.group(1)) if m.group(1).replace(".", "", 1).isdigit() else 0.0
-    return value * 1000 if (m.group(2) or "").lower().startswith("b") else value
+    digits = m.group(1).replace(",", "")
+    value = float(digits) if digits.replace(".", "", 1).isdigit() else 0.0
+    unit = (m.group(2) or "").lower()
+    if unit.startswith("b"):
+        return value * 1000
+    if unit in ("k", "thousand"):
+        return value / 1000
+    return value
 
 
-def likely_big(c: PoolCompany) -> str:
-    """With no headcount, a late-stage round (Series C+) or a $50 Mn+ raise means a company of hundreds:
-    the reason, or ''."""
+def late_round(round_name: str, min_series: str = "C") -> bool:
+    """'Series C' / 'Series E' / 'pre-IPO' are late for min_series C; 'Pre-Series C' and 'Series B' aren't."""
+    m = _SERIES.search(round_name or "")
+    if m:
+        return not m.group(1) and m.group(2).lower() >= min_series.strip().lower()[:1]
+    return bool(_LATE_WORDS.search(round_name or ""))
+
+
+def never_cold_email(name: str, domain: str, profile: Profile) -> str:
+    """The `never_cold_email` entry (a name or a domain) this company matches, or ''."""
+    for entry in profile.never_cold_email:
+        e = entry.strip().lower()
+        if not e:
+            continue
+        if ("." in e and domain and (domain == e or domain.endswith("." + e))) or name_key(e) == name_key(name):
+            return entry
+    return ""
+
+
+def large_reason(c: PoolCompany, profile: Profile) -> str:
+    """Why an unknown-size company counts as large (apply-only, never cold-emailed), or ''. The
+    `never_cold_email` list applies whatever the size."""
+    listed = never_cold_email(c.name, c.domain, profile)
+    if listed:
+        return f"on the never_cold_email list ({listed})"
     if c.team_size is not None:
         return ""
+    cfg = profile.pool["large_company"]
     for f in c.funding:
-        if _LATE_ROUND.search(f.round or ""):
-            return f"late-stage round ({f.round}), likely 300+ people"
-        if _amount_mn(f.amount) >= 50:
-            return f"raised {f.amount} in one round, likely 300+ people"
+        if late_round(f.round, str(cfg["min_series"])):
+            return f"{f.round} round with no headcount (Series {cfg['min_series']}+), likely 300+ people"
+        if _amount_mn(f.amount) >= float(cfg["min_amount_mn"]):
+            return f"raised {f.amount} in one round (${cfg['min_amount_mn']} Mn+), likely 300+ people"
     return ""
+
+
+def funding_only(c: PoolCompany) -> bool:
+    return bool(c.sources) and all(s.startswith("funding:") for s in c.sources)
+
+
+def product_fit(c: PoolCompany, profile: Profile, site_text: str = "") -> tuple[str, list[str]]:
+    """Phase 2c.1: is this a software-product company? ('', notes) when it passes, else (why it fails, notes).
+
+    Applies to pool companies not from YC. A name like '... Capital' with investing words, or a non-software
+    business (biofuel, solar, hardware, logistics operators, wholesale, lenders, services, ...) in the name,
+    sector, one-liner or homepage fails unless its homepage (`site_text`) or one-liner names a software product
+    (at least `software_product_min` product phrases). A company found only in funding news must also reach
+    `funding_only_min_tech` tech-fit points (an Inc42 software subsector counts as one more product word)."""
+    cfg = profile.pool
+    notes: list[str] = []
+    if any(s == "yc" for s in c.sources):
+        return "", notes
+    sectors = " ".join(f"{r.sector} {r.subsector}" for r in c.funding)
+    own = " ".join([c.name, c.description, " ".join(c.tags), sectors, site_text])
+    product = matching_phrases(f"{c.description} {site_text}", [w.lower() for w in cfg["software_product"]])
+    shows_product = len(product) >= int(cfg["software_product_min"])
+    if product:
+        notes.append(f"product words: {', '.join(product[:5])}")
+    invest_name = matching_phrases(c.name, [w.lower() for w in cfg["investment_name"]])
+    invest_words = matching_phrases(f"{c.description} {site_text}", [w.lower() for w in cfg["investment_words"]])
+    if invest_name and invest_words and not shows_product:
+        return (f"investment firm, not a software product ('{invest_name[0]}' in the name; site: "
+                f"{', '.join(invest_words[:3])})"), notes
+    non_sw = matching_phrases(own, [w.lower() for w in cfg["non_software"]])
+    if non_sw and not shows_product:
+        return (f"not a software-product business ({', '.join(non_sw[:3])}); neither its homepage nor its "
+                f"one-liner names a software product"), notes
+    if non_sw:
+        notes.append(f"{', '.join(non_sw[:2])}, but it names a software product")
+    if funding_only(c):
+        fit, words = tech_fit(own, profile)
+        sw = sorted({r.subsector for r in c.funding
+                     if r.subsector.strip().lower() in [x.lower() for x in cfg["software_sectors"]]})
+        if sw and fit in ("mid", "unclear"):       # the sector is one more product word
+            fit = "high" if fit == "mid" else "mid"
+            notes.append(f"Inc42 software sector: {', '.join(sw)}")
+        w = cfg["weights"]
+        points = {"high": int(w["tech_high"]), "mid": int(w["tech_mid"]), "low": int(w["tech_low"])}.get(fit, 0)
+        floor = int(cfg["funding_only_min_tech"])
+        if points < floor:
+            return (f"funding news only, tech fit {points:+d} below the floor ({floor})"
+                    + (f": {', '.join(words[:3])}" if words else ": no product words")), notes
+    return "", notes
+
+
+def exclusion(c: PoolCompany, profile: Profile, site_text: str = "") -> tuple[str, str]:
+    """('large' | 'tech_floor' | '', why): why a pool company can't be a cold-email target."""
+    big = large_reason(c, profile)
+    if big:
+        return "large", big
+    why, _ = product_fit(c, profile, site_text)
+    return ("tech_floor", why) if why else ("", "")
 
 
 def tech_fit(text: str, profile: Profile) -> tuple[str, list[str]]:
@@ -104,7 +192,7 @@ def score_company(c: PoolCompany, profile: Profile, today: date, has_board: bool
         reasons.append("+0 no sourced funding round in the last 12 months")
 
     size = c.team_size
-    big = likely_big(c)
+    big = large_reason(c, profile)
     if big:
         reasons.append(f"+0 team size unknown, but {big}")
     elif size is None:
@@ -156,7 +244,16 @@ def score_company(c: PoolCompany, profile: Profile, today: date, has_board: bool
     return max(0, min(100, total)), reasons
 
 
-def select(scored: list[Scored], fixed: dict[str, str], profile: Profile, outside: int) -> list[Scored]:
+def rank_key(s: Scored) -> tuple:
+    """Best score first; India before remote-global; then by source (YC > portfolio > funding > list), so ties
+    don't go to the old hand-made lists by alphabet."""
+    order = {"yc": 0, "portfolio": 1, "funding": 2, "list": 3}
+    best = min((order.get(x.split(":", 1)[0], 4) for x in s.company.sources), default=4)
+    return (-s.score, 0 if s.company.region == "india" else 1, best, s.company.name.lower())
+
+
+def select(scored: list[Scored], fixed: dict[str, str], profile: Profile, outside: int,
+           site_texts: dict[str, str] | None = None) -> list[Scored]:
     """Rank everything; mark the fixed companies (domain -> why) and the best of the rest as selected,
     up to `target_size` targets in all. Fixed companies take slots too, and `outside` slots are already taken
     by targets that aren't in the pool (role / manual targets without a pool record)."""
@@ -165,7 +262,7 @@ def select(scored: list[Scored], fixed: dict[str, str], profile: Profile, outsid
     remote_cap = int(cfg["remote_global_cap"])
     in_pool = {s.company.domain for s in scored}
     slots = int(cfg["target_size"]) - outside - sum(1 for d in fixed if d in in_pool)
-    scored.sort(key=lambda s: (-s.score, 0 if s.company.region == "india" else 1, s.company.name.lower()))
+    scored.sort(key=rank_key)
     remote = sum(1 for s in scored if s.company.domain in fixed and s.company.region != "india")
     marketplaces = {name_key(m) for m in profile.recruiting_marketplaces}
     for i, s in enumerate(scored, start=1):
@@ -180,8 +277,12 @@ def select(scored: list[Scored], fixed: dict[str, str], profile: Profile, outsid
         if c.team_size is not None and c.team_size > size_cap:
             s.why_selected = f"not selected: {c.team_size} people (apply via postings)"
             continue
-        if likely_big(c):
-            s.why_selected = f"not selected: {likely_big(c)} (apply via postings)"
+        kind, why = exclusion(c, profile, (site_texts or {}).get(c.key, ""))
+        if kind == "large":
+            s.why_selected = f"not selected: large - {why} (apply via postings)"
+            continue
+        if kind:
+            s.why_selected = f"not selected: tech-fit floor - {why}"
             continue
         if slots <= 0:
             s.why_selected = "not selected: below the top ~400"
@@ -207,16 +308,35 @@ class PoolSummary:
     fixed_count: int = 0
 
 
-def _fixed_targets(store, profile: Profile, pool_domains: set[str]) -> tuple[dict[str, str], int]:
-    """Domains that must stay in (domain -> why) and how many targets sit outside the pool."""
+def _tid(company_key: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", company_key.lower()).strip("-")       # outreach.target_id
+
+
+def _fixed_targets(store, profile: Profile, pool: dict[str, PoolCompany] | set[str],
+                   site_texts: dict[str, str] | None = None) -> tuple[dict[str, str], int]:
+    """Domains that must stay in (domain -> why) and how many targets sit outside the pool.
+
+    A general-outreach target already looked up stays in only while it passes the 2c.1 rules (large company,
+    tech-fit floor); one that fails is left to `select`, which drops it - unless it's protected (queued, sent,
+    bounced or held to the 2b draft rules)."""
+    pool_by_domain = pool if isinstance(pool, dict) else {}
+    pool_domains = set(pool)
+    protected = store.protected_target_ids()
     fixed: dict[str, str] = {}
     role_keys = set()
     for row in store.ranked(("A", "B")):
         if row["contact_hint"] != MARKETPLACE_HINT:
             role_keys.add(name_key(row["company"]))
     for check in store.contact_checks():
-        if check["domain"]:
-            fixed.setdefault(check["domain"], f"kept: already a {check['kind'].replace('_', ' ')} target")
+        if not check["domain"]:
+            continue
+        c = pool_by_domain.get(check["domain"])
+        if (check["kind"] == "general_outreach" and c is not None and _tid(check["company_key"]) not in protected
+                and exclusion(c, profile, (site_texts or {}).get(c.key, "") or
+                              (site_texts or {}).get(check["company_key"], ""))[0]):
+            continue
+        fixed.setdefault(check["domain"], f"kept: already a {check['kind'].replace('_', ' ')} target"
+                         + (" (queued / locked)" if _tid(check["company_key"]) in protected else ""))
     for row in store.manual_targets():
         if site_domain(row["website"] or ""):
             fixed[site_domain(row["website"])] = "kept: manual target"
@@ -303,9 +423,10 @@ def build_pool(store, client, profile: Profile, today: date, log: Log = print, s
     for c in pool:
         score, reasons = score_company(c, profile, today, c.domain in boards, contexts.get(c.key, ""))
         scored.append(Scored(c, score, reasons))
-    fixed, fixed_count = _fixed_targets(store, profile, {c.domain for c in pool})
+    site_texts = store.site_texts()
+    fixed, fixed_count = _fixed_targets(store, profile, {c.domain: c for c in pool}, site_texts)
     summary.fixed_count = fixed_count
-    summary.scored = select(scored, fixed, profile, fixed_count)
+    summary.scored = select(scored, fixed, profile, fixed_count, site_texts)
     summary.funding = {
         "6m": sum(1 for s in scored if (f := latest_funding(s.company)) and _age(f.date, today) <= 6),
         "12m": sum(1 for s in scored if (f := latest_funding(s.company)) and _age(f.date, today) <= 12),
@@ -323,17 +444,46 @@ def rescore(store, profile: Profile, today: date) -> list[Scored]:
         c = PoolCompany.from_json(json.loads(row["data"]))
         score, reasons = score_company(c, profile, today, c.domain in boards, contexts.get(c.key, ""))
         out.append(Scored(c, score, reasons, bool(row["selected"]), row["rank"], row["why_selected"] or ""))
-    out.sort(key=lambda s: (-s.score, 0 if s.company.region == "india" else 1, s.company.name.lower()))
+    out.sort(key=rank_key)
     for i, s in enumerate(out, start=1):
         s.rank = i
     store.save_pool(out)
     return out
 
 
+@dataclass
+class Change:
+    company: PoolCompany
+    was_selected: bool
+    now: Scored
+
+
+def reselect(store, profile: Profile, today: date) -> tuple[list[Scored], list[Change]]:
+    """2c.1: score the stored pool again and redo the selection under the current rules, offline. Companies
+    already worked on stay in while they pass (large company, tech-fit floor); those that fail are dropped and
+    their slots refilled with the next best by hiring likelihood (same size, same remote-global cap)."""
+    boards, contexts, site_texts = board_domains(store), store.context_texts(), store.site_texts()
+    before = {r["key"]: bool(r["selected"]) for r in store.pool_rows()}
+    scored = []
+    for row in store.pool_rows():
+        c = PoolCompany.from_json(json.loads(row["data"]))
+        score, reasons = score_company(c, profile, today, c.domain in boards, contexts.get(c.key, ""))
+        scored.append(Scored(c, score, reasons))
+    fixed, outside = _fixed_targets(store, profile, {s.company.domain: s.company for s in scored}, site_texts)
+    out = select(scored, fixed, profile, outside, site_texts)
+    store.save_pool(out)
+    changes = [Change(s.company, before.get(s.company.key, False), s) for s in out
+               if s.selected != before.get(s.company.key, False)]
+    return out, changes
+
+
 def pool_target_hint(c: PoolCompany, profile: Profile) -> str:
     """Who to look for: by team size when known; an unknown-size startup from a portfolio, funding
     roundup or list is treated as small (founder or CTO)."""
     from applyflow.scoring import hint_for_size
+    if large_reason(c, profile):
+        from applyflow.scoring import APPLY_ONLY_HINT
+        return APPLY_ONLY_HINT
     if c.team_size is not None:
         return hint_for_size(c.team_size, None, profile)
     return "founder or CTO"

@@ -34,10 +34,11 @@ from applyflow.text import page_summary
 Log = Callable[[str], None]
 
 STATUS_ORDER = {"ready": 0, "sent": 1, "exhausted": 2, "do_not_contact": 3, "no_contact": 4, "apply_only": 5,
-                "no_domain": 6}
+                "no_domain": 6, "dropped": 7}
 STATUS_LABELS = {"ready": "ready to send", "sent": "sent", "exhausted": "every address bounced",
                  "do_not_contact": "on the do-not-contact list", "no_contact": "no contact found",
-                 "apply_only": "apply via the posting", "no_domain": "no website domain"}
+                 "apply_only": "apply via the posting", "no_domain": "no website domain",
+                 "dropped": "dropped from the pool (2c.1 rules)"}
 KIND_ORDER = {"role": 0, "manual": 1, "general_outreach": 2}
 
 
@@ -200,6 +201,8 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
     locked = store.draft_rules()
     pool_keys = {r["key"]: r for r in store.pool_rows()}
     pool_domains = store.pool_by_domain()
+    protected = store.protected_target_ids()
+    from applyflow.pool import never_cold_email
     events: dict[str, list] = {}
     for e in store.events():
         events.setdefault(e["target_id"], []).append(e)
@@ -260,9 +263,21 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
                             hl_score=prow["score"] if prow is not None else None,
                             hl_reasons=json.loads(prow["reasons"] or "[]") if prow is not None else [])
         blocked = next((b for b in (dnc.blocks(a.email) for a in seq) if b), "")
+        # 2c.1: a pool target the current rules dropped (large, below the tech-fit floor) or a never_cold_email
+        # company is not emailed - unless it's already queued / sent / locked (protected).
+        hold = ""
+        if tid not in protected:
+            listed = never_cold_email(check["company"], check["domain"] or "", profile)
+            if listed:
+                hold = f"apply_only:on the never_cold_email list ({listed})"
+            elif prow is not None and not prow["selected"] and kind == "general_outreach":
+                why = prow["why_selected"] or "not selected"
+                hold = ("apply_only:" if "large" in why else "dropped:") + why
         if sent:
             item.status, item.sent_email, item.sent_date = "sent", sent[-1]["email"], sent[-1]["event_date"]
             item.address = next((a for a in seq if a.email == item.sent_email), Address(email=item.sent_email))
+        elif hold:
+            item.status, item.status_note = hold.split(":", 1)
         elif not seq:
             item.status = check["status"] if check["status"] in ("apply_only", "no_domain") else "no_contact"
         elif blocked:

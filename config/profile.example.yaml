@@ -290,6 +290,9 @@ large_company_job_count: 60
 # the hiring company. Their roles stay in the report with action "apply"; they're never contact
 # targets. Postings that say "our client" / "one of our clients" are treated the same way.
 recruiting_marketplaces: ["Weekday"]
+# Phase 2c.1: companies never cold-emailed, whatever their size (names or domains): they're apply-only,
+# e.g. a large company whose headcount no source gives.
+never_cold_email: ["Darwinbox"]
 
 # ---------------------------------------------------------------------------
 # Outreach (Phase 2b): drafts and the daily send queue. ApplyFlow never sends anything:
@@ -365,3 +368,8 @@ pool:
     recent_6y: 5
     india: 8
     remote_global: 0
+  # Phase 2c.1: an unknown-size company is large (apply-only) after a Series C+ round or one $50 Mn+ round.
+  large_company: {min_series: "C", min_amount_mn: 50}
+  funding_only_min_tech: 20  # funding-news-only companies need this many tech-fit points (20 = two product words)
+  # Non-software businesses, the product phrases that override them and the other 2c.1 lists default to
+  # applyflow/config.py (DEFAULT_POOL: non_software, software_product, software_sectors, investment_*).
