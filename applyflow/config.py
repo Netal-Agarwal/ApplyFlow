@@ -17,6 +17,7 @@ CONFIG_DIR = ROOT / "config"
 PROFILE_PATH = CONFIG_DIR / "profile.yaml"
 PROFILE_EXAMPLE_PATH = CONFIG_DIR / "profile.example.yaml"
 SEEDS_PATH = CONFIG_DIR / "seeds.yaml"
+SOURCES_PATH = CONFIG_DIR / "sources.yaml"
 DO_NOT_CONTACT_PATH = CONFIG_DIR / "do_not_contact.txt"
 DRAFTS_DIR = ROOT / "output" / "drafts"
 DEFAULT_DB_PATH = ROOT / "data" / "applyflow.db"
@@ -67,6 +68,42 @@ DEFAULT_DISCOVERY = {
 }
 
 
+DEFAULT_POOL = {                       # Phase 2c: the ranked pool of companies to email
+    "target_size": 400,                # outreach targets selected (role + manual targets included)
+    "remote_global_cap": 80,           # at most this many remote-global (non-India) companies
+    "max_team_size": 300,              # bigger companies aren't picked for general outreach (apply-only)
+    "weights": {
+        "funding_6m": 25,              # a funding round announced in the last 6 months
+        "funding_12m": 15,             # ... in the last 12 months
+        "team_best": 20,               # 10-150 people
+        "team_small": 10,              # 2-9
+        "team_mid": 8,                 # 151-500
+        "team_unknown": 6,
+        "board": 12,                   # a careers page / job board / YC "hiring" flag
+        "tech_high": 20,               # SaaS, APIs, developer tools, AI, fintech infra, data, cloud
+        "tech_mid": 10,                # one tech word
+        "tech_low": -10,               # D2C, food, fashion, services
+        "city": 10,                    # Bangalore, Hyderabad, Delhi NCR
+        "recent_3y": 10,               # YC batch / founded in the last 3 years
+        "recent_6y": 5,
+        "india": 8,
+        "remote_global": 0,
+    },
+    "tech_high": ["saas", "b2b", "api", "apis", "developer", "developers", "devtools", "developer tools", "sdk",
+                  "infrastructure", "infra", "platform", "ai", "artificial intelligence", "ml", "machine learning",
+                  "llm", "llms", "genai", "generative ai", "agent", "agents", "agentic", "fintech", "payments",
+                  "payment", "lending", "banking", "data", "analytics", "database", "cloud", "devops",
+                  "automation", "workflow", "security", "cybersecurity", "enterprise", "open source",
+                  "software", "deeptech", "deep tech", "computer vision", "voice ai", "observability"],
+    "tech_low": ["d2c", "food", "beverage", "beverages", "coffee", "restaurant", "restaurants", "fashion", "apparel",
+                 "clothing", "jewellery", "jewelry", "beauty", "skincare", "cosmetics", "personal care", "furniture",
+                 "home decor", "consulting", "agency", "staffing", "recruitment agency", "real estate brokerage",
+                 "travel agency", "wedding", "snacks", "dairy", "ecommerce brand", "consumer brand", "nutrition"],
+    "cities": ["bangalore", "bengaluru", "hyderabad", "delhi", "new delhi", "gurgaon", "gurugram", "noida",
+               "ncr", "delhi ncr"],
+}
+
+
 class ConfigError(ValueError):
     pass
 
@@ -100,6 +137,7 @@ class Profile:
     contacts: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_CONTACTS))
     discovery: dict[str, Any] = field(default_factory=dict)
     outreach: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_OUTREACH))
+    pool: dict[str, Any] = field(default_factory=lambda: _pool({}))
     source_path: Path = field(default=PROFILE_PATH)
 
     @property
@@ -163,6 +201,7 @@ def parse_profile(data: dict[str, Any], source_path: Path = PROFILE_PATH) -> Pro
         contacts={**DEFAULT_CONTACTS, **(data.get("contacts") or {})},
         discovery={**DEFAULT_DISCOVERY, **(data.get("discovery") or {})},
         outreach=_outreach(data.get("outreach") or {}),
+        pool=_pool(data.get("pool") or {}),
         source_path=source_path,
     )
 
@@ -171,6 +210,20 @@ def _outreach(raw: dict[str, Any]) -> dict[str, Any]:
     out = {**DEFAULT_OUTREACH, **raw}
     out["tier3"] = {**DEFAULT_OUTREACH["tier3"], **(raw.get("tier3") or {})}
     return out
+
+
+def _pool(raw: dict[str, Any]) -> dict[str, Any]:
+    out = {**DEFAULT_POOL, **raw}
+    out["weights"] = {**DEFAULT_POOL["weights"], **(raw.get("weights") or {})}
+    return out
+
+
+def load_sources(path: Path = SOURCES_PATH) -> dict[str, Any]:
+    """config/sources.yaml: portfolio pages, funding roundups and GitHub lists (Phase 2c)."""
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        return yaml.safe_load(fh) or {}
 
 
 def load_profile(path: Path | None = None) -> Profile:

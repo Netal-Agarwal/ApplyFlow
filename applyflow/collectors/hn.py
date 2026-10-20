@@ -124,6 +124,7 @@ class HNWhoIsHiringCollector:
                     posted_at=hit.get("created_at") or "",
                     emails=extract_emails(text),
                     department=story_title,
+                    poster=str(hit.get("author") or ""),
                 )
             )
         return jobs

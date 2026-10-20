@@ -21,8 +21,8 @@ from pathlib import Path
 from typing import Callable
 
 from applyflow.config import Profile
-from applyflow.contacts import (FREEMAIL, DoNotContact, classify_address, manual_result, manual_target,
-                                needs_manual_check, role_group, search_links)
+from applyflow.contacts import (FREEMAIL, DoNotContact, classify_address, inbox_preference, manual_result,
+                                manual_target, name_from_local, needs_manual_check, role_group, search_links)
 from applyflow.detect import normalize_website
 from applyflow.discovery import name_key, site_domain
 from applyflow.drafting import (HR_GROUPS, Draft, DraftInputs, Facts, check_written, display_company, gmail_url,
@@ -76,6 +76,7 @@ class Address:
     source_url: str = ""
     mx: str = ""
     note: str = ""                 # "alternate for <name>" / "backup contact"
+    proof: str = ""                # company site | posting | manual | github profile | demoted: ...
 
     @property
     def tier(self) -> int | None:
@@ -94,7 +95,8 @@ def address_sequence(contacts) -> list[Address]:
         group = contact_group(c["name"] or "", c["role"] or "", c["email"], c["source"] or "")
         base = Address(email=c["email"], name=c["name"] or "", role=c["role"] or "", confidence=c["confidence"],
                        group=group, source=c["source"] or "", source_url=c["source_url"] or "", mx=c["mx"] or "",
-                       note="" if i == 0 else "backup contact")
+                       note="" if i == 0 else "backup contact",
+                       proof=(c["proof"] if "proof" in c.keys() else "") or "")
         seq.append(base)
         for alt in json.loads(c["alternates"] or "[]"):
             seq.append(Address(email=alt, name=base.name, role=base.role, confidence="guessed", group=group,
@@ -130,6 +132,13 @@ class OutreachItem:
     domain: str = ""
     priority: int = 0
     manual_links: list[tuple[str, str]] = field(default_factory=list)
+    hl_score: int | None = None                # hiring likelihood (Phase 2c pool), when the company is in it
+    hl_reasons: list[str] = field(default_factory=list)
+    queued_on: str = ""                        # an earlier stored batch holds it, not yet marked sent
+
+    @property
+    def inbox_pref(self) -> int:
+        return inbox_preference(self.address.email) if self.address else 9
 
     @property
     def gmail(self) -> str:
@@ -163,8 +172,24 @@ def _remote_global(locations: str) -> bool:
     return any(p == "remote" or "india" not in p for p in parts) if parts else False
 
 
-def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts: Facts | None = None) -> list[OutreachItem]:
+def _funding_inputs(pool_row, today: date) -> dict[str, str]:
+    """The latest sourced round within 12 months, as draft inputs ('recent' = within 6 months)."""
+    if pool_row is None:
+        return {}
+    from applyflow.pool import funding_signal
+    from applyflow.sources import PoolCompany, months_ago
+    c = PoolCompany.from_json(json.loads(pool_row["data"]))
+    f = funding_signal(c, today, 12)
+    if f is None:
+        return {}
+    return {"round": f.round, "amount": f.amount, "date": f.date, "source_url": f.source_url,
+            "recent": "yes" if (months_ago(f.date, today) or 0) <= 6 else ""}
+
+
+def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts: Facts | None = None,
+                day: date | None = None) -> list[OutreachItem]:
     """Every outreach target with its current address and draft, in priority order."""
+    day = day or today()
     facts = facts or load_facts(profile)
     dnc = dnc or DoNotContact()
     cfg = profile.outreach
@@ -172,6 +197,9 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
     terms = tech_terms(profile)
     roles = _role_rows(store)
     written = store.written_drafts()
+    locked = store.draft_rules()
+    pool_keys = {r["key"]: r for r in store.pool_rows()}
+    pool_domains = store.pool_by_domain()
     events: dict[str, list] = {}
     for e in store.events():
         events.setdefault(e["target_id"], []).append(e)
@@ -184,7 +212,18 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         ctx = store.get_context(key)
         kind = check["kind"]
         inputs = DraftInputs(target_id=tid, company_key=key, company=display_company(check["company"]), kind=kind,
-                             team_size=check["team_size"])
+                             team_size=check["team_size"], rules=locked.get(tid, "2c"))
+        prow = pool_keys.get(key) or pool_domains.get(check["domain"] or "")
+        if prow is not None and not disc:          # Phase 2c pool company (portfolio, funding, list)
+            pdata = json.loads(prow["data"])
+            inputs.one_liner, inputs.batch = pdata.get("description") or "", pdata.get("batch") or ""
+            inputs.locations, inputs.website = pdata.get("locations") or "", pdata.get("website") or ""
+            inputs.remote_global = prow["region"] == "remote_global"
+        if prow is not None:
+            if inputs.rules != "2b" and kind != "role":
+                inputs.company = display_company(prow["name"])      # the pool's (merged) spelling
+            inputs.funding = _funding_inputs(prow, day)
+            inputs.hl_score = prow["score"]
         if disc:
             inputs.one_liner, inputs.batch = disc["description"] or "", disc["batch"] or ""
             inputs.locations, inputs.website = disc["locations"] or "", disc["website"] or ""
@@ -217,7 +256,9 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         remaining = [a for a in seq if a.email not in bounced]
         item = OutreachItem(target_id=tid, company_key=key, company=inputs.company, kind=kind, status="ready",
                             inputs=inputs, draft=None, bounced=bounced, best_score=check["best_score"],
-                            team_size=check["team_size"], domain=check["domain"] or "")
+                            team_size=check["team_size"], domain=check["domain"] or "",
+                            hl_score=prow["score"] if prow is not None else None,
+                            hl_reasons=json.loads(prow["reasons"] or "[]") if prow is not None else [])
         blocked = next((b for b in (dnc.blocks(a.email) for a in seq) if b), "")
         if sent:
             item.status, item.sent_email, item.sent_date = "sent", sent[-1]["email"], sent[-1]["event_date"]
@@ -232,7 +273,8 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
             item.address, item.backups = remaining[0], remaining[1:]
         if item.address:
             a = item.address
-            inputs.to_email, inputs.contact_name, inputs.contact_role = a.email, a.name, a.role
+            name = a.name or (name_from_local(a.email) if inputs.rules != "2b" else "")
+            inputs.to_email, inputs.contact_name, inputs.contact_role = a.email, name, a.role
             inputs.confidence, inputs.contact_group = a.confidence, a.group
             item.send_tier = a.tier
         item.why = _why(check, inputs, kind)
@@ -241,8 +283,10 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         items.append(item)
 
     def priority(it: OutreachItem) -> tuple:
+        """Within a send tier: role targets first, then hiring likelihood, then inbox preference (2c)."""
         size = it.team_size
-        return (STATUS_ORDER.get(it.status, 9), it.send_tier or 9, KIND_ORDER.get(it.kind, 3), -(it.best_score or 0),
+        return (STATUS_ORDER.get(it.status, 9), it.send_tier or 9, KIND_ORDER.get(it.kind, 3),
+                -(it.hl_score if it.hl_score is not None else -1), it.inbox_pref, -(it.best_score or 0),
                 0 if size is not None and lo <= size <= hi else 1, size if size is not None else 10**6,
                 it.company.lower())
     items.sort(key=priority)
@@ -313,7 +357,7 @@ def ensure_context(store, client, items: list[OutreachItem], log: Log = lambda _
             ctx = {"website": site, "status": "ok", **page_summary(client.get_page(site))}
             log(f"  {it.company:<32} context: {ctx['title'][:60] or '(no title)'}")
         except FetchError as exc:
-            status = "blocked" if "robots" in str(exc) else "failed"
+            status = "blocked" if "disallowed by robots" in str(exc) else "failed"
             ctx = {"website": site, "status": status, "note": str(exc)[:200]}
             log(f"  {it.company:<32} context {status}: {exc}")
         store.save_context(it.company_key, ctx)
@@ -445,6 +489,7 @@ class Batch:
     tier3_held: int = 0               # tier-3 targets left out by the gate (locked, paused or over the limit)
     skipped_same_company: int = 0
     first_sent: str | None = None
+    held_earlier: int = 0             # ready targets already in an earlier day's stored queue (not marked sent)
 
     @property
     def tier3_open(self) -> bool:
@@ -465,6 +510,9 @@ def pick_batch(items: list[OutreachItem], day: date, size: int, history: dict, t
             break
         if it.status != "ready" or it.send_tier is None or it.target_id in taken:
             continue
+        if it.queued_on and it.queued_on < batch.day:
+            batch.held_earlier += 1           # waiting in an earlier day's stored batch
+            continue
         if it.company_id in seen:
             batch.skipped_same_company += 1
             continue
@@ -478,10 +526,21 @@ def pick_batch(items: list[OutreachItem], day: date, size: int, history: dict, t
     return batch
 
 
+def mark_queued(store, items: list[OutreachItem]) -> None:
+    """Note, on each ready item, the earliest stored batch that already holds it."""
+    by_id = {it.target_id: it for it in items}
+    for row in store.conn.execute("SELECT target_id, MIN(batch_date) FROM send_queue GROUP BY target_id"):
+        it = by_id.get(row[0])
+        if it is not None and it.status == "ready":
+            it.queued_on = row[1]
+
+
 def make_queue(store, profile: Profile, day: date, size: int | None = None, dnc: DoNotContact | None = None,
                save: bool = True) -> Batch:
-    """Pick (and store) a day's batch. Entries of that day already marked sent stay in it."""
-    items = refresh_drafts(store, profile, dnc) if save else build_items(store, profile, dnc)
+    """Pick (and store) a day's batch. Entries of that day already marked sent stay in it; targets waiting in
+    an earlier day's stored batch are left for that day."""
+    items = refresh_drafts(store, profile, dnc) if save else build_items(store, profile, dnc, day=day)
+    mark_queued(store, items)
     size = int(size or profile.outreach["daily_batch"])
     by_id = {it.target_id: it for it in items}
     sent_today = [by_id[r["target_id"]] for r in store.queue(day.isoformat())
@@ -500,6 +559,7 @@ def stored_or_preview_batch(store, profile: Profile, items: list[OutreachItem],
     """The stored queue for `day` if `queue` ran, else a preview (not saved): (items, stored, tier-3 gate)."""
     by_id = {it.target_id: it for it in items}
     rows = store.queue(day.isoformat())
+    mark_queued(store, items)
     batch = pick_batch(items, day, int(profile.outreach["daily_batch"]), store.send_history(day.isoformat()),
                        profile.outreach["tier3"])
     if rows:

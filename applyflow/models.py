@@ -57,6 +57,7 @@ class Job:
     emails: list[str] = field(default_factory=list)   # contact emails stated in the posting
     board_size: int | None = None   # open jobs on the company's board (size proxy)
     team_size: int | None = None    # company headcount when known
+    poster: str = ""                # who posted it, when the source says (HN username)
 
     @property
     def id(self) -> str:

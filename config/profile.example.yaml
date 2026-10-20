@@ -339,3 +339,29 @@ discovery:
     max_team_size: 1000
     regions_any: ["India"]            # company must be located in one of these ("Remote" alone means US-remote)
     preferred_team_size: [10, 300]    # teams in this range are checked before smaller or larger ones
+
+# ---------------------------------------------------------------------------
+# Outreach pool (Phase 2c): `python -m applyflow pool` scores every company from every source
+# (config/sources.yaml) by how likely it is to hire an intern / new grad, and selects the top ones.
+# Every factor is logged as a reason. Defaults live in applyflow/config.py (DEFAULT_POOL).
+# ---------------------------------------------------------------------------
+pool:
+  target_size: 400          # outreach targets in all (role + manual targets included)
+  remote_global_cap: 80     # at most this many remote-global (non-India) companies
+  max_team_size: 300        # bigger companies aren't picked for general outreach
+  weights:
+    funding_6m: 25          # a sourced funding round in the last 6 months
+    funding_12m: 15         # ... in the last 12 months
+    team_best: 20           # 10-150 people
+    team_small: 10          # 2-9
+    team_mid: 8             # 151-500
+    team_unknown: 6
+    board: 12               # careers page / job board / YC hiring flag
+    tech_high: 20           # SaaS, APIs, developer tools, AI/ML, fintech infra, data, cloud
+    tech_mid: 10
+    tech_low: -10           # pure D2C, food, fashion, services
+    city: 10                # Bangalore, Hyderabad, Delhi NCR
+    recent_3y: 10           # YC batch / founded in the last 3 years
+    recent_6y: 5
+    india: 8
+    remote_global: 0

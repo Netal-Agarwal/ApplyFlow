@@ -74,6 +74,7 @@ class Contact:
     inbox_rank: int = 0       # among inboxes: founders@/careers@ 0, hello@/team@/hi@ 1, contact@/info@ 2
     alternates: list[str] = field(default_factory=list)   # for guesses: what to try if the first bounces
     mx: str = ""              # ok | unchecked ('' when no MX check ran)
+    proof: str = ""           # where a published address was seen: company site | posting | manual | github profile
 
     def label(self) -> str:
         who = f"{self.name} ({self.role})" if self.name else self.role
@@ -131,6 +132,7 @@ class ContactResult:
     reasons: list[str] = field(default_factory=list)          # what each source found
     why_primary: str = ""
     context: dict[str, str] = field(default_factory=dict)     # homepage title / description / snippet
+    careers_page: str = ""                                    # a careers / jobs page on the site (2c)
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +182,8 @@ def classify_address(email: str, small: bool = True) -> tuple[str, str, str, int
     """
     local = email.split("@", 1)[0].lower()
     base = re.sub(r"[._-]?\d+$", "", local)
+    if re.sub(r"[._-]", "", base) in FOUNDER_INBOXES | HIRING_INBOXES:      # "join-us@", "work_with_us@"
+        base = re.sub(r"[._-]", "", base)
     if base in SKIP_LOCALS or any(part in SKIP_LOCALS for part in re.split(r"[._+-]", base)) \
             or any(word in base for word in _SKIP_ANYWHERE):      # "loansupport@", "customercare@"
         return None                       # also "help-events@", "support.team@"
@@ -193,6 +197,36 @@ def classify_address(email: str, small: bool = True) -> tuple[str, str, str, int
     if base in GENERAL_INBOXES:
         return "general_inbox", f"{local}@ inbox", "fallback", 3
     return "other", "", "verified", 0
+
+
+def _local_base(email: str) -> str:
+    base = re.sub(r"[._-]?\d+$", "", email.split("@", 1)[0].lower())
+    squashed = re.sub(r"[._-]", "", base)
+    return squashed if squashed in FOUNDER_INBOXES | HIRING_INBOXES else base
+
+
+def shared_inbox(email: str) -> bool:
+    """founders@ / careers@ / hello@ / info@ ...: an inbox several people read, not one person's address."""
+    base = _local_base(email)
+    return base in FOUNDER_INBOXES | HIRING_INBOXES | set(FOUNDER_REACHING) | GENERAL_INBOXES
+
+
+ROUTABLE_INBOXES = {"hello", "hi", "team", "info", "contact"}     # general inboxes: the subject must say "application"
+
+
+def routable_inbox(email: str) -> bool:
+    return _local_base(email) in ROUTABLE_INBOXES
+
+
+def inbox_preference(email: str) -> int:
+    """Among published inboxes: founders@ / careers@ / talent@ / hr@ / jobs@ 0, hello@ / hi@ / team@ 1,
+    info@ / contact@ 2; anything else (a person's address, other inboxes) 3."""
+    base = _local_base(email)
+    if base in FOUNDER_INBOXES | HIRING_INBOXES:
+        return 0
+    if base in FOUNDER_REACHING:
+        return FOUNDER_REACHING[base]
+    return 3
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +262,52 @@ def title_names_other_org(title: str, company: str) -> bool:
         if word[0].isupper() and w not in _TITLE_VOCAB and w not in own:
             return True
     return False
+
+
+_FULL_NAME = re.compile(r"(?=\b([A-Z][a-z]{1,20})\s+([A-Z][a-z]{1,25})\b)")     # overlapping pairs
+
+
+def name_from_handle(handle: str, local: str) -> str:
+    """'panchamkhaitan' + 'pkhaitan' -> 'Pancham'; 'priyasharma' + 'priya' -> 'Priya'; '' when not unambiguous."""
+    h, loc = re.sub(r"[^a-z]", "", (handle or "").lower()), re.sub(r"[^a-z]", "", (local or "").lower())
+    if len(h) < 4 or len(loc) < 3 or h == loc:
+        return ""
+    if len(loc) >= 4 and h[0] == loc[0] and h.endswith(loc[1:]) and len(h) - len(loc) + 1 >= 3:
+        return h[: len(h) - len(loc) + 1].capitalize()           # flast: first = the handle minus the surname
+    if h.startswith(loc) and len(h) - len(loc) >= 3:
+        return loc.capitalize()                                   # first@: the handle is first + surname
+    return ""
+
+
+def name_from_local(email: str) -> str:
+    """'gaurav.gautam@' -> 'Gaurav': a first.last address names its owner. '' for anything else."""
+    m = re.fullmatch(r"([a-z]{3,})[._]([a-z]{2,})", email.split("@", 1)[0].lower())
+    if not m or shared_inbox(email) or any(w in _NAME_STOP or w in SKIP_LOCALS or w in HIRING_INBOXES
+                                           or w in FOUNDER_REACHING for w in m.groups()):
+        return ""
+    return m.group(1).capitalize()
+
+
+def name_for_address(email: str, texts: list[str], handles: list[str] = ()) -> str:
+    """The first name behind a personal address, only when it's unambiguous: a full name in the post or
+    page whose pattern gives this address (first.last, flast, first ...), else a poster handle that
+    splits cleanly around it. '' when it can't be determined confidently."""
+    if shared_inbox(email):
+        return ""
+    local = email.split("@", 1)[0].lower()
+    firsts = set()
+    for text in texts:
+        for first, last in _FULL_NAME.findall(text or ""):
+            if first.lower() in _NAME_STOP or last.lower() in _NAME_STOP:
+                continue
+            if pattern_of(local, f"{first} {last}"):
+                firsts.add(first)
+    if len(firsts) == 1:
+        return firsts.pop()
+    if firsts:
+        return ""
+    found = {n for n in (name_from_handle(h, local) for h in handles) if n}
+    return found.pop() if len(found) == 1 else ""
 
 
 PATTERNS = ["first.last", "firstlast", "first_last", "flast", "f.last", "first"]   # specific before generic
@@ -461,6 +541,7 @@ class SiteFindings:
     blocked: list[str] = field(default_factory=list)                  # robots.txt said no
     failed: list[str] = field(default_factory=list)
     home: dict[str, str] = field(default_factory=dict)                # homepage summary (Phase 2b)
+    careers_page: str = ""                                            # a careers / jobs page that loaded (2c)
 
 
 def read_site(client, website: str, domain: str, max_pages: int) -> SiteFindings:
@@ -476,11 +557,13 @@ def read_site(client, website: str, domain: str, max_pages: int) -> SiteFindings
         try:
             page = client.get_page(url)
         except FetchError as exc:
-            (out.blocked if "robots" in str(exc) else out.failed).append(url)
+            (out.blocked if "disallowed by robots" in str(exc) else out.failed).append(url)
             if url == root:
                 queue.extend(root + p for p in CONVENTIONAL_PATHS[:max_pages])
             continue
         out.read.append(url)
+        if not out.careers_page and re.search(r"careers?|jobs|join-us|work-with-us", urlparse(url).path, re.I):
+            out.careers_page = url
         if url == root:
             queue.extend(likely_pages(page, root, max_pages))
             out.home = {"website": root, "status": "ok", **page_summary(page)}
@@ -506,7 +589,7 @@ def yc_people(client, slug: str) -> tuple[list[Person], str]:
     try:
         page = client.get_page(url)
     except FetchError as exc:
-        return [], ("YC page disallowed by robots.txt" if "robots" in str(exc) else f"YC page failed ({exc})")
+        return [], ("YC page disallowed by robots.txt" if "disallowed by robots" in str(exc) else f"YC page failed ({exc})")
     m = _DATA_PAGE.search(page)
     try:
         founders = json.loads(htmllib.unescape(m.group(1)))["props"]["company"]["founders"] if m else []
@@ -531,7 +614,7 @@ def github_contacts(client, org: str, domain: str, budget: GitHubBudget, max_mem
         role = match.role if match else "engineer (GitHub org member)"
         found.append(Contact(name=name, role=role, email=email, confidence="verified", source="github",
                              source_url=str(user.get("html_url") or f"https://github.com/{member['login']}"),
-                             group=role_group(role) if match else "other"))
+                             group=role_group(role) if match else "other", proof="github profile"))
     return found, f"GitHub org {org}: {len(members)} public member(s), {len(found)} with an email on {domain}"
 
 
@@ -658,8 +741,10 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
     # 1. Emails the postings publish for applicants always count, domain or not.
     for job in target.jobs:
         for email in job.emails:
-            add(Contact(name="", role="named in the posting for applicants", email=email.lower(),
-                        confidence="verified", source="posting", source_url=job.url, group="posting"))
+            name = name_for_address(email, [job.description], [job.poster] if job.poster else [])
+            add(Contact(name=name, role="named in the posting for applicants", email=email.lower(),
+                        confidence="verified", source="posting", source_url=job.url, group="posting",
+                        proof="posting", note="name from the post / poster handle" if name else ""))
     if target.kind == "role":
         result.reasons.append(f"postings: {len(cands)} applicant email(s)")
     if not target.domain and cands:
@@ -689,6 +774,7 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
         site = read_site(client, target.website or f"https://{target.domain}", target.domain,
                          int(profile.contacts["max_site_pages"]))
         result.context = site.home
+        result.careers_page = site.careers_page
         for p in site.people:
             if title_names_other_org(p.role, target.company):
                 result.reasons.append(f"ignored {p.name} ({p.role}): title names another organisation "
@@ -711,7 +797,8 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
                 confidence, role, inbox_rank = "fallback", "unrecognised address", 3
             add(Contact(name=owner.name if owner else "", role=role or "person at the company", email=email,
                         confidence=confidence, source="website", source_url=url, group=group,
-                        inbox_rank=inbox_rank))
+                        inbox_rank=inbox_rank,
+                        proof="company site" if same_site(site_domain(url), target.domain) else "other page"))
         note = f"website: read {len(site.read)} page(s), {len(site.emails)} email(s), {len(people)} named people"
         if site.blocked:
             note += f"; robots.txt disallowed {', '.join(urlparse(u).path or '/' for u in site.blocked)}"
@@ -876,7 +963,39 @@ def build_targets(store, profile: Profile, seeds: list, client=None, log: Log = 
             yc_slug=row["key"][3:] if row["key"].startswith("yc:") else "")
     for row in store.manual_targets():         # add-target
         targets.setdefault(row["key"], manual_target(row, profile))
+    # Phase 2c: the selected outreach pool, best hiring likelihood first (one target per domain).
+    from applyflow.pool import pool_target_hint
+    from applyflow.sources import PoolCompany
+    taken = {t.domain for t in targets.values() if t.domain}
+    for row in store.pool_rows(selected_only=True):
+        if row["key"] in targets or (row["domain"] and row["domain"] in taken):
+            continue
+        c = PoolCompany.from_json(json.loads(row["data"]))
+        targets[row["key"]] = Target(
+            key=row["key"], company=c.name, kind="general_outreach", hint=pool_target_hint(c, profile),
+            website=c.website, domain=c.domain, domain_source=f"pool ({c.sources[0] if c.sources else '?'})",
+            team_size=c.team_size, yc_slug=c.yc_slug)
+        taken.add(c.domain)
     return list(targets.values())
+
+
+def read_no_pages(check) -> bool:
+    """A lookup that couldn't read a single page of the company's site (network down, site failing)."""
+    if check is None or not check["domain"]:
+        return False
+    reasons = json.loads(check["details"] or "{}").get("reasons", [])
+    return any(r.startswith("website: read 0 page(s)") for r in reasons)
+
+
+def pending_targets(store, targets: list[Target], days: int, force: bool = False,
+                    limit: int = 0, retry_unread: bool = False) -> tuple[list[Target], list[Target]]:
+    """(this batch, everything still to look up): targets not checked within `days`, in target order, so
+    `contacts --limit N` picks up where the previous run stopped. `retry_unread` also re-queues lookups
+    that read no page of the site (e.g. the connection dropped mid-run)."""
+    checks = {c["company_key"]: c for c in store.contact_checks()} if retry_unread else {}
+    pending = [t for t in targets if force or not store.contacts_checked_recently(t.key, days)
+               or (retry_unread and read_no_pages(checks.get(t.key)))]
+    return (pending[:limit] if limit else pending), pending
 
 
 def manual_target(row, profile: Profile) -> Target:
@@ -901,7 +1020,7 @@ def manual_result(target: Target, row) -> ContactResult:
         if row["person_role"]:
             role, group = row["person_role"], role_group(row["person_role"])
     contact = Contact(name=row["person_name"] or "", role=role, email=email, confidence="verified", source="manual",
-                      source_url="", group=group, fit=0, note="given with add-target")
+                      source_url="", group=group, fit=0, note="given with add-target", proof="manual")
     return ContactResult(target=target, status="found", contacts=[contact], considered=[contact],
                          reasons=["address given with add-target; no lookup"],
                          why_primary="given by hand with add-target")
@@ -914,4 +1033,77 @@ def result_to_json(result: ContactResult) -> dict[str, Any]:
         "people": [asdict(p) for p in result.people],
         "reasons": result.reasons,
         "why_primary": result.why_primary,
+        "careers_page": result.careers_page,
     }
+
+
+# ---------------------------------------------------------------------------
+# Source proof (Phase 2c): every published address must point at the page on the
+# company's own domain where it appeared.
+# ---------------------------------------------------------------------------
+
+PUBLISHED = ("verified", "published_inbox", "fallback")
+
+
+def page_has_email(page: str, email: str) -> bool:
+    email = email.lower()
+    return email in [m.strip().lower() for m in _MAILTO.findall(page)] or email in extract_emails(html_to_text(page)) \
+        or email in page.lower()
+
+
+@dataclass
+class ProofCheck:
+    company: str
+    email: str
+    status: str             # confirmed | moved (found on another page) | demoted | kept (posting / manual / github)
+    url: str = ""
+    note: str = ""
+
+
+def verify_sources(store, client, profile: Profile, log: Log = lambda _: None,
+                   only: set[str] | None = None) -> list[ProofCheck]:
+    """Check each stored published address against its source page; look on the rest of the site if it
+    moved; demote it to guessed if it can't be confirmed on the company's own domain."""
+    out: list[ProofCheck] = []
+    sites: dict[str, SiteFindings] = {}
+    checks = {c["company_key"]: c for c in store.contact_checks()}
+    for row in store.conn.execute("SELECT * FROM contacts ORDER BY company_key, rank").fetchall():
+        if row["confidence"] not in PUBLISHED or (only is not None and row["company_key"] not in only):
+            continue
+        email, company = row["email"], row["company"] or row["company_key"]
+        proof = row["proof"] or ""
+        if row["source"] in ("posting", "manual", "github"):
+            kind = {"posting": "posting", "manual": "manual", "github": "github profile"}[row["source"]]
+            if proof != kind:
+                store.set_contact_proof(row["id"], row["source_url"] or "", kind)
+            out.append(ProofCheck(company, email, "kept", row["source_url"] or "", f"{kind} (not a website address)"))
+            continue
+        if proof == "company site":
+            out.append(ProofCheck(company, email, "confirmed", row["source_url"] or "", "proved when found"))
+            continue
+        check = checks.get(row["company_key"])
+        domain = (check["domain"] if check else "") or email.rsplit("@", 1)[-1]
+        url = row["source_url"] or ""
+        if url and same_site(site_domain(url), domain):
+            try:
+                if page_has_email(client.get_page(url), email):
+                    store.set_contact_proof(row["id"], url, "company site")
+                    out.append(ProofCheck(company, email, "confirmed", url))
+                    log(f"  {company:<28} {email:<34} confirmed on {url}")
+                    continue
+            except FetchError as exc:
+                log(f"  {company:<28} {email:<34} source page failed ({exc}); re-reading the site")
+        site = sites.get(domain)
+        if site is None:
+            site = sites[domain] = read_site(client, f"https://{domain}", domain, int(profile.contacts["max_site_pages"]))
+        page = next((u for e, u in site.emails if e == email and same_site(site_domain(u), domain)), "")
+        if page:
+            store.set_contact_proof(row["id"], page, "company site")
+            out.append(ProofCheck(company, email, "moved", page, f"not on {url or '(no source page)'}; found on {page}"))
+            log(f"  {company:<28} {email:<34} found on {page} (was {url or 'no source page'})")
+            continue
+        why = f"not found on {url or 'any recorded page'} or the {len(site.read)} page(s) of {domain} read now"
+        store.demote_contact(row["id"], why)
+        out.append(ProofCheck(company, email, "demoted", url, why))
+        log(f"  {company:<28} {email:<34} DEMOTED to guessed: {why}")
+    return out

@@ -27,6 +27,7 @@ decision-maker. Big companies are kept but mostly filter out (senior roles).
      `tests/test_contacts_2a1.py`.
    - **2b drafts & send-ready report - done (2026-10-19)**, see "Phase 2b notes" and
      `tests/test_drafting.py`. An LLM is allowed for research/drafting, never for sending decisions.
+   - **2c outreach pool at scale - done (2026-10-20)**, see "Phase 2c notes" and `tests/test_pool_2c.py`.
 3. Sending & follow-ups: Gmail API (OAuth) from the user's **personal Gmail**.
    Ramp from ~10-15/day to 30-40/day max. Randomized gaps, business hours in the
    recipient's timezone, no open-tracking pixels, resume linked (attached only for recruiters/HR or
@@ -76,6 +77,9 @@ python -m applyflow import-drafts # load output/drafts/written/<id>.md, validate
 python -m applyflow queue --date YYYY-MM-DD   # the day's batch (stored); report shows it
 python -m applyflow mark-sent <id> | --batch YYYY-MM-DD ; mark-bounced <id>
 python -m applyflow add-target "Co" --website co.com [--note] [--email] [--name] [--role]
+python -m applyflow pool [--rescore]   # 2c: every source -> deduped pool, hiring-likelihood score, top ~400
+python -m applyflow contacts --limit 50 [--retry-unread]   # resumable batches with an ETA
+python -m applyflow verify-sources     # every published address must appear on the company's own site
 pytest
 ```
 
@@ -200,6 +204,56 @@ Open points for Phase 3 / later:
 - "rails" dropped from the fact-check tech list (false positive on "payment rails"; "ruby on rails" stays).
 - Live: 42/42 written drafts pass; 2026-10-20 preview = the same 10 tier-1/2 targets; tier 3 "locked: nothing
   sent yet".
+
+## Phase 2c notes (outreach pool at scale, 2026-10-20)
+
+- **Sources** (`sources.py`, config in `config/sources.yaml`, all via the polite client): (a) yc-oss `all.json`:
+  active India companies (any hiring status) + active "Fully Remote" teams of 10-150 (`remote_global`, cap 80);
+  (b) portfolio pages through one generic regex collector: Better Capital, Axilor, Prime VP, Antler (India tag,
+  `?0b933bfd_page=N`); skipped 100X.VC (404), Blume (no websites), Speciale (robots.txt), Surge/Titan/Kae/Kalaari/
+  Stellaris/Nexus/Venture Catalysts (no name+website pairs); (c) Inc42 Funding Galore RSS (`content:encoded`
+  carries each week's table; only 24 weeks, May-Oct 2026) - rounds matched by domain/name, else the website from
+  `inc42.com/company/<slug>/` (cached in `funding_lookups`), else dropped; Entrackr skipped (prose, no websites);
+  (d) GitHub raw files: hemanth/bangalore-startups (`startups.json`), rushout09/ai-startups-india (README table).
+  `merge` dedupes by domain (yc > portfolio > funding > list for key/name; fields filled, sources/funding unioned).
+- **Hiring likelihood** (`pool.py`, weights in `pool.weights`): funding 6m 25 / 12m 15, team 10-150 20 (2-9 10,
+  151-500 8, unknown 6), careers page/board/YC hiring 12, tech fit high 20 / one word 10 / D2C-food-fashion -10,
+  preferred city 10, batch/founded <=3y 10 (<=6y 5), India 8, remote-global 0; capped 0-100, every factor a reason.
+  Selection: ~400 targets in all; existing contact checks / manual / role targets always kept; not selected:
+  >300 people, Series C+ or $50 Mn+ rounds with unknown size ("likely 300+"), recruiting marketplaces, past the
+  remote-global cap. `pool --rescore` re-scores (careers pages found by `contacts`) and keeps selections.
+- **Contacts**: pool targets join `build_targets` (key `yc:<slug>` or `pool:<domain>`, unknown size -> founder or
+  CTO). `contacts --limit N` resumes where it stopped; `--retry-unread` redoes lookups that read no page. Every
+  contact stores `proof` (company site | posting | manual | github profile); `verify-sources` re-checks old ones and
+  demotes to guessed if the address isn't on the company's domain (2026-10-19: 15 confirmed incl. RocketSDR's
+  contact@ on /about, 0 demoted). Inbox preference: founders@/careers@/talent@/hr@/jobs@ > hello@/hi@/team@ >
+  info@/contact@ (`inbox_preference`); "join-us@" counts as a hiring inbox.
+- **Drafts**: greeting "Hi <First>," (name from the post/page, an HN poster handle - `jobs.poster` - or a
+  first.last address), "Hi," for a person whose name isn't known, "Hi <Company> team," only for shared inboxes.
+  hello@/hi@/team@/info@/contact@ need an application subject ("Internship / new-grad application – Netal Agarwal
+  (Backend|AI|Full-stack|Cloud, Jan 2027)"). Funding may be mentioned only with a sourced signal; round and month
+  must match it ("raises the bar" and a company's own "fundraising platform" don't count). Drafts queued before 2c
+  (the 10 in the 2026-10-21 batch) are locked to the 2b rules (`draft_rules`), so the scheduled Gmail drafts
+  stay valid. `output/drafts/drafts_2c.py` + `write_2c.py` wrote 100 drafts (never touching `protected_2b.txt`).
+- **Queue**: order within a tier is role targets, then hiring likelihood, then inbox preference; a target in an
+  earlier day's stored batch that isn't marked sent is held for that day (`held_earlier`).
+- **HTTP**: a DNS/connection failure on robots.txt is "site unreachable" and not cached (it used to cache
+  "Disallow: /" for the run, which hit ~80 lookups during a network drop).
+- Live 2026-10-20: before dedupe 2,850 (YC India 157, YC remote 338, Better 183, Axilor 52, Prime 53, Antler 83,
+  Bangalore list 1,693, AI list 22, Inc42 271 new + 100 matched); after 2,768 (India 2,430, remote 338); funding
+  signal 300 (all within 6 months: the feed only reaches May 2026). Selected 391 pool + role/manual = 401 targets.
+  Primary contacts: verified 10, published_inbox 115, guessed 169, fallback 15, none 88, apply_only 3, no_domain 1.
+  Ready 309 (T1 50, T2 90, T3 169). Drafts: 142 Claude-written (42 from 2b + 100 new), 259 template, 0 failing.
+
+Open points for Phase 3 / later:
+1. **Funding history is short**: Inc42's feed has 24 weeks, so "within 12 months" adds nothing over 6 months yet.
+   Keep running `pool` weekly to build history (rounds are re-read each run, not stored), or store rounds.
+2. **Funded companies lack size**: 132 selected come from funding news with no headcount; big ones with no
+   amount slip through (Darwinbox). A size source (Inc42 profile "employees" field?) would help.
+3. **The Bangalore list is old** (1,693 entries, mostly 2014-era): it rarely makes the top 400 (4 selected) but
+   inflates the pool; consider dropping it or requiring a working homepage.
+4. **88 targets have no contact** (30 sites unreadable: robots.txt, 403, down). They need a manual look or drop.
+5. Tier 3 (169 guessed) is still behind the gate; at 20/day the T1-2 supply (140) lasts about 11 days.
 
 ## Calibration backlog
 

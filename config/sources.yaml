@@ -1,0 +1,84 @@
+# Company sources for the Phase 2c outreach pool (`python -m applyflow pool`).
+#
+# Every page here was checked on 2026-10-19: robots.txt allows it for ApplyFlow's
+# User-Agent, and its HTML gives a company name plus the company's own website.
+# Fetches go through the polite client (1 request/second/host, robots.txt checked).
+#
+# Portfolio entries are parsed by one generic collector (sources.parse_portfolio):
+#   item:        regex for one company's block in the page (DOTALL)
+#   name:        regex, group 1 = the company name (inside the block)
+#   website:     regex, group 1 = the company's URL
+#   description: optional regex, group 1 = a one-liner
+#   location:    optional regex, group 1 = a location label
+#   keep:        optional regex the block must match (e.g. an India tag)
+#   locations:   locations to record when the page doesn't say (India-only portfolios)
+#   pages:       optional {param: "...", max: N} for ?param=N pagination
+#
+# Sources looked at and skipped (2026-10-19):
+#   100X.VC (/portfolio is a 404; the homepage links no companies), Blume (/companies lists names
+#   but links each to a blume.vc page, no websites), Speciale Invest (robots.txt disallows
+#   /portfolio), Peak XV Surge (company cards carry no website links), Titan Capital, Kae Capital,
+#   Kalaari, Stellaris, Nexus, Venture Catalysts (logos / script-rendered, no name + website pairs),
+#   Antler India's location page (team bios, not companies; the global portfolio is used instead,
+#   filtered to its India tag).
+
+portfolios:
+  - id: better-capital
+    label: Better Capital portfolio
+    url: https://www.bettercapital.vc/portfolio
+    item: '<tr class="bg-w">.*?</tr>'
+    name: '<a href="[^"]+"[^>]*>([^<]+)</a>'
+    website: '<a href="([^"]+)"'
+    description: '</td>\s*<td class="border-bottom">(.*?)</td>'
+    locations: "India"
+  - id: axilor
+    label: Axilor Ventures portfolio
+    url: https://axilor.com/portfolio/
+    item: '<a href="https?://[^"]+" target="new" class="box-link".*?</figcaption>'
+    name: '<h3 class="h4">([^<]+)</h3>'
+    website: 'href="([^"]+)"'
+    description: 'data-tooltip="([^"]*)"'
+    locations: "Bengaluru, India"
+  - id: prime-vp
+    label: Prime Venture Partners portfolio
+    url: https://www.primevp.in/portfolio
+    item: '<a class="flex-center[^"]*" href="https?://[^"]+"[^>]*>\s*<img alt="[^"]+"'
+    name: 'alt="([^"]+)"'
+    website: 'href="([^"]+)"'
+    locations: "India"
+  - id: antler
+    label: Antler portfolio (India tag)
+    url: https://www.antler.co/portfolio
+    item: '<div class="portco_card">.*?class="clickable_link'
+    name: 'fs-cmsfilter-field="name"[^>]*>([^<]+)<'
+    website: 'href="(https?://[^"]+)" class="clickable_link'
+    description: 'fs-cmsfilter-field="description"[^>]*>([^<]+)<'
+    keep: 'tag_small_text">India<'
+    year: 'fs-cmsfilter-field="year"[^>]*>\s*<div[^>]*>(\d{4})<'
+    locations: "India"
+    pages: {param: "0b933bfd_page", max: 40}
+
+funding:
+  - id: inc42
+    label: Inc42 Funding Galore (weekly)
+    feed: https://inc42.com/tag/funding-galore/feed/
+    index: https://inc42.com/tag/funding-galore/
+    company_page: "https://inc42.com/company/{slug}/"     # the startup's profile, which links its website
+    max_articles: 30
+# Skipped: Entrackr's weekly reports (robots.txt allows them, but deals are in prose with no websites;
+# Inc42 covers the same weeks as a table), YourStory (funding pages are script-rendered).
+
+github_lists:
+  - id: bangalore-startups
+    repo: hemanth/bangalore-startups
+    branch: master
+    path: startups.json
+    format: name_url_json
+    locations: "Bengaluru, India"
+  - id: ai-startups-india
+    repo: rushout09/ai-startups-india
+    branch: main
+    path: README.md
+    format: markdown_table
+    locations: "India"
+# Skipped: avinassh/dev-startups-india (names only, no websites; last updated 2021).

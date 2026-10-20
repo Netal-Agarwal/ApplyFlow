@@ -324,8 +324,9 @@ class SendTierAndQueueTests(unittest.TestCase):
         day2 = make_queue(store, PROFILE, date(2026, 10, 22))
         self.assertEqual((day2.gate.state, day2.gate.limit), ("limited", 5))
         ids = [it.target_id for it in day2.items]
-        self.assertEqual(ids[:2], ["yc-lumen-health", "yc-cobalt"])      # tier 1, 2 first
-        self.assertEqual(set(ids[2:]), {"yc-orbit-pay", "yc-delta"})
+        # Lumen and Cobalt wait in the stored 10-21 batch (not marked sent yet), so day 2 doesn't repeat them.
+        self.assertEqual(day2.held_earlier, 2)
+        self.assertEqual(set(ids), {"yc-orbit-pay", "yc-delta"})
         self.assertNotIn("yc-nimbus", ids)                               # already sent
 
     def test_tier3_daily_limit_counts_inside_the_batch(self):
@@ -467,7 +468,8 @@ class BounceTests(unittest.TestCase):
             mark_sent(store, PROFILE, "yc-orbit-pay", date(2026, 10, day))
             it = mark_bounced(store, PROFILE, "yc-orbit-pay", date(2026, 10, day))
         self.assertEqual(it.draft.source, "template")
-        self.assertIn("greeting is 'Hi Ravi,', expected 'Hi Orbit Pay team,'", it.draft.failures)
+        self.assertIn("greeting is 'Hi Ravi,', but hello@orbitpay.example is a shared inbox "
+                      "(expected 'Hi Orbit Pay team,')", it.draft.failures)
 
 
 class ImportTests(unittest.TestCase):

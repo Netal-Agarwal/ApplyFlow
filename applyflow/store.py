@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     emails          TEXT,                      -- JSON list
     board_size      INTEGER,
     team_size       INTEGER,
+    poster          TEXT,                      -- HN username of the post's author
     first_seen      TEXT NOT NULL,
     last_seen       TEXT NOT NULL,
     active          INTEGER NOT NULL DEFAULT 1
@@ -110,7 +111,8 @@ CREATE TABLE IF NOT EXISTS contacts (
     is_primary    INTEGER NOT NULL,
     rank          INTEGER NOT NULL,
     alternates    TEXT,                        -- JSON list: what to try if a guessed address bounces
-    mx            TEXT                         -- ok | unchecked (DNS lookup failed) | '' (not checked)
+    mx            TEXT,                        -- ok | unchecked (DNS lookup failed) | '' (not checked)
+    proof         TEXT                         -- 2c: company site | posting | manual | demoted: ... | ''
 );
 CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company_key);
 
@@ -191,6 +193,36 @@ CREATE TABLE IF NOT EXISTS send_queue (
     PRIMARY KEY (batch_date, target_id)
 );
 
+CREATE TABLE IF NOT EXISTS pool_companies (    -- Phase 2c: every company from every source, scored
+    key           TEXT PRIMARY KEY,            -- yc:<slug> | pool:<domain>
+    name          TEXT NOT NULL,
+    website       TEXT,
+    domain        TEXT,
+    region        TEXT,                        -- india | remote_global
+    sources       TEXT,                        -- JSON list: yc, portfolio:<id>, funding:<id>, list:<id>
+    data          TEXT NOT NULL,               -- JSON: the merged PoolCompany (incl. funding rounds)
+    score         INTEGER NOT NULL,            -- hiring likelihood, 0-100
+    reasons       TEXT,                        -- JSON list, one per factor
+    selected      INTEGER NOT NULL,
+    rank          INTEGER,
+    why_selected  TEXT,
+    updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pool_domain ON pool_companies(domain);
+
+CREATE TABLE IF NOT EXISTS funding_lookups (   -- startup name -> website from its Inc42 profile ('' = none)
+    name_key    TEXT PRIMARY KEY,
+    website     TEXT,
+    checked_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS draft_rules (       -- drafts held to an older rule set (already scheduled)
+    target_id   TEXT PRIMARY KEY,
+    rules       TEXT NOT NULL,                 -- "2b": greeting / subject rules from before Phase 2c
+    reason      TEXT,
+    locked_at   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS collection_runs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     board_key   TEXT NOT NULL,
@@ -217,11 +249,21 @@ class Store:
         self._migrate()
 
     def _migrate(self) -> None:
-        """Add columns introduced after a database was first created."""
+        """Add columns introduced after a database was first created.
+
+        Phase 2c: drafts already in a stored queue when the new greeting / subject rules arrived were
+        scheduled in Gmail under the 2b rules, so they're locked to those (draft_rules), once."""
+        if not self.conn.execute("SELECT 1 FROM draft_rules LIMIT 1").fetchone() and                 not self.conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'draft_rules_done'").fetchone():
+            now = _now()
+            for row in self.conn.execute("SELECT DISTINCT target_id, batch_date FROM send_queue").fetchall():
+                self.conn.execute("INSERT OR IGNORE INTO draft_rules (target_id, rules, reason, locked_at) "
+                                  "VALUES (?, '2b', ?, ?)", (row[0], f"queued for {row[1]} before Phase 2c", now))
+            self.conn.execute("CREATE TABLE IF NOT EXISTS draft_rules_done (at TEXT)")
         for table, column, decl in (("jobs", "team_size", "INTEGER"), ("scores", "contact_hint", "TEXT"),
                                      ("scores", "merged_locations", "TEXT"), ("companies", "detected_from", "TEXT"),
                                      ("companies", "status_reason", "TEXT"), ("contacts", "alternates", "TEXT"),
-                                     ("contacts", "mx", "TEXT"), ("outreach_events", "send_tier", "INTEGER")):
+                                     ("contacts", "mx", "TEXT"), ("outreach_events", "send_tier", "INTEGER"),
+                                     ("jobs", "poster", "TEXT"), ("contacts", "proof", "TEXT")):
             cols = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
@@ -248,8 +290,8 @@ class Store:
                     """
                     INSERT INTO jobs (id, source, external_id, company, board_key, title, url, apply_url,
                                       description, locations, remote, employment_type, department, posted_at,
-                                      emails, board_size, team_size, first_seen, last_seen, active)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                                      emails, board_size, team_size, poster, first_seen, last_seen, active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     ON CONFLICT(id) DO UPDATE SET
                         company=excluded.company, title=excluded.title, url=excluded.url,
                         apply_url=excluded.apply_url, description=excluded.description,
@@ -257,7 +299,7 @@ class Store:
                         employment_type=excluded.employment_type, department=excluded.department,
                         posted_at=excluded.posted_at, emails=excluded.emails,
                         board_size=excluded.board_size, board_key=excluded.board_key,
-                        team_size=excluded.team_size,
+                        team_size=excluded.team_size, poster=excluded.poster,
                         last_seen=excluded.last_seen, active=1
                     """,
                     (
@@ -265,7 +307,7 @@ class Store:
                         job.apply_url, job.description, json.dumps(job.locations),
                         None if job.remote is None else int(job.remote), job.employment_type,
                         job.department, job.posted_at, json.dumps(job.emails), job.board_size,
-                        job.team_size, now, now,
+                        job.team_size, job.poster, now, now,
                     ),
                 )
             placeholders = ",".join("?" for _ in seen_ids) or "''"
@@ -300,6 +342,7 @@ class Store:
             emails=json.loads(row["emails"] or "[]"),
             board_size=row["board_size"],
             team_size=row["team_size"],
+            poster=(row["poster"] if "poster" in row.keys() else "") or "",
         )
 
     def active_jobs(self) -> list[Job]:
@@ -440,9 +483,9 @@ class Store:
             for rank, c in enumerate(result.contacts):
                 self.conn.execute(
                     "INSERT INTO contacts (company_key, company, name, role, email, confidence, source, source_url, "
-                    "found_at, is_primary, rank, alternates, mx) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "found_at, is_primary, rank, alternates, mx, proof) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (t.key, t.company, c.name, c.role, c.email, c.confidence, c.source, c.source_url, now,
-                     int(rank == 0), rank, json.dumps(c.alternates), c.mx))
+                     int(rank == 0), rank, json.dumps(c.alternates), c.mx, getattr(c, "proof", "")))
             if getattr(result, "context", None):          # homepage text read during the lookup (2b)
                 self._write_context(t.key, result.context)
             from applyflow.contacts import result_to_json
@@ -609,6 +652,60 @@ class Store:
     def queue(self, batch_date: str) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM send_queue WHERE batch_date = ? ORDER BY position",
                                  (batch_date,)).fetchall()
+
+    def draft_rules(self) -> dict[str, str]:
+        return {r["target_id"]: r["rules"] for r in self.conn.execute("SELECT * FROM draft_rules")}
+
+    # -- outreach pool (Phase 2c) ------------------------------------------------
+
+    def save_pool(self, scored) -> None:
+        """Replace the stored pool with these scored companies."""
+        now = _now()
+        with self.conn:
+            self.conn.execute("DELETE FROM pool_companies")
+            for s in scored:
+                c = s.company
+                self.conn.execute(
+                    "INSERT INTO pool_companies (key, name, website, domain, region, sources, data, score, reasons, "
+                    "selected, rank, why_selected, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(key) DO NOTHING",
+                    (c.key, c.name, c.website, c.domain, c.region, json.dumps(c.sources), json.dumps(c.to_json()),
+                     s.score, json.dumps(s.reasons), int(s.selected), s.rank, s.why_selected, now))
+
+    def pool_rows(self, selected_only: bool = False) -> list[sqlite3.Row]:
+        cond = "WHERE selected = 1" if selected_only else ""
+        return self.conn.execute(f"SELECT * FROM pool_companies {cond} ORDER BY rank").fetchall()
+
+    def pool_row(self, key: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM pool_companies WHERE key = ?", (key,)).fetchone()
+
+    def pool_by_domain(self) -> dict[str, sqlite3.Row]:
+        return {r["domain"]: r for r in self.conn.execute("SELECT * FROM pool_companies WHERE domain != ''")}
+
+    def funding_lookups(self) -> dict[str, str]:
+        return {r["name_key"]: r["website"] or "" for r in self.conn.execute("SELECT * FROM funding_lookups")}
+
+    def save_funding_lookups(self, resolved: dict[str, str]) -> None:
+        now = _now()
+        with self.conn:
+            for k, site in resolved.items():
+                self.conn.execute("INSERT INTO funding_lookups (name_key, website, checked_at) VALUES (?, ?, ?) "
+                                  "ON CONFLICT(name_key) DO NOTHING", (k, site, now))
+
+    def context_texts(self) -> dict[str, str]:
+        """company_key -> homepage title + meta description (fetched context), for tech fit."""
+        return {r["company_key"]: f"{r['homepage_title'] or ''} {r['meta_description'] or ''}"
+                for r in self.conn.execute("SELECT * FROM company_context WHERE status = 'ok'")}
+
+    def demote_contact(self, contact_id: int, why: str) -> None:
+        """Source proof failed: the address is only a guess now (send tier 3)."""
+        with self.conn:
+            self.conn.execute("UPDATE contacts SET confidence = 'guessed', proof = ? WHERE id = ?",
+                              (f"demoted: {why}", contact_id))
+
+    def set_contact_proof(self, contact_id: int, url: str, proof: str) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE contacts SET source_url = ?, proof = ? WHERE id = ?", (url, proof, contact_id))
 
     def _reject_reason_counts(self, limit: int = 8) -> list[tuple[str, int]]:
         """Group rejection reasons into broad categories ("asks for N+ years" -> one bucket)."""

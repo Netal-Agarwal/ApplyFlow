@@ -115,6 +115,10 @@ class PoliteClient:
                 response = self._get(f"{origin}/robots.txt", None, {"Accept": "text/plain"}, max_retries=0)
                 parser.parse(response.text.splitlines())
             except FetchError as exc:
+                if exc.status is None:
+                    # No answer at all (DNS / connection failure): the site is unreachable right now. Not
+                    # cached, so a dropped connection doesn't mark the site robots-blocked for the whole run.
+                    raise FetchError(url, f"site unreachable ({exc})") from exc
                 # No robots.txt (404) means everything is allowed; other failures mean we can't tell.
                 parser.parse([] if exc.status in (404, 410) else ["User-agent: *", "Disallow: /"])
             self._robots[origin] = parser
@@ -126,6 +130,13 @@ class PoliteClient:
             raise FetchError(url, "disallowed by robots.txt")
         response = self._get(url, None, {"Accept": "text/html"}, max_retries=0)
         return decode_page(response)[:2_000_000]
+
+    def get_text(self, url: str) -> str:
+        """A plain-text resource (RSS feed, raw file), honouring robots.txt; retried like an API call."""
+        if not self.allowed_by_robots(url):
+            raise FetchError(url, "disallowed by robots.txt")
+        response = self._get(url, None, {"Accept": "*/*"})
+        return decode_page(response)[:5_000_000]
 
 
 def decode_page(response: Any) -> str:

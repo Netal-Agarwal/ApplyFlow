@@ -18,6 +18,9 @@
     python -m applyflow mark-sent <id>   # record a sent email (or --batch D for a whole day)
     python -m applyflow mark-bounced <id>   # record a bounce; the next address is suggested
     python -m applyflow add-target "Co" --website co.com   # a target of your own
+    python -m applyflow pool             # Phase 2c: every source -> scored pool, top ~400 selected
+    python -m applyflow contacts --limit 50   # contacts in resumable batches, with an ETA
+    python -m applyflow verify-sources   # every published address must appear on the company's site
 
 ApplyFlow never sends email: you send from Gmail and record it here.
 """
@@ -156,14 +159,19 @@ def cmd_contacts(args, profile, store) -> int:
     mx = MXChecker(client, store, int(profile.contacts["mx_cache_days"]))
     days = int(profile.contacts["recheck_days"])
     roles = sum(t.kind == "role" for t in targets)
+    from applyflow.contacts import pending_targets
+    batch, pending = pending_targets(store, targets, days, args.force, args.limit, args.retry_unread)
+    skipped = len(targets) - len(pending)
+    recent = "" if args.force else f"; {skipped} checked in the last {days} days are skipped"
     print(f"Finding contacts for {len(targets)} targets ({roles} with A/B roles, {len(targets) - roles} general "
-          f"outreach){'' if args.force else f'; companies checked in the last {days} days are skipped'}...")
-    done = skipped = 0
+          f"outreach){recent}.")
+    print(f"This batch: {len(batch)} of {len(pending)} still to look up"
+          + (f" (--limit {args.limit}; run again to continue where this stops)" if args.limit else "") + ".")
+    done = 0
     from applyflow.contacts import manual_result
-    for target in targets:
-        if not args.force and store.contacts_checked_recently(target.key, days):
-            skipped += 1
-            continue
+    import time
+    started = time.monotonic()
+    for i, target in enumerate(batch, start=1):
         manual = store.get_manual_target(target.key) if target.kind == "manual" else None
         if manual is not None and manual["email"]:
             store.save_contact_result(manual_result(target, manual))     # given by hand: no lookup
@@ -171,11 +179,67 @@ def cmd_contacts(args, profile, store) -> int:
         result = find_contacts(client, target, profile, dnc, github, log=print, mx=mx)
         store.save_contact_result(result)
         done += 1
+        elapsed = time.monotonic() - started
+        per = elapsed / i
+        left_batch, left_all = len(batch) - i, len(pending) - i
+        print(f"    [{i}/{len(batch)}] {_mmss(elapsed)} elapsed, ~{_mmss(per * left_batch)} left in this batch"
+              + (f", ~{_mmss(per * left_all)} for all {left_all} remaining" if left_all != left_batch else ""))
     counts = store.contact_counts()
-    print(f"\nLooked up {done}, skipped {skipped} checked recently. {github.status()}. {mx.status()}.")
+    remaining = len(pending) - len(batch)
+    print(f"\nLooked up {done}, skipped {skipped} checked recently. {github.status()}. {mx.status()}."
+          + (f"\n{remaining} target(s) still to look up: run `contacts --limit {args.limit}` again." if remaining else ""))
     print("Primary contacts by confidence: " + ", ".join(
         f"{k}={counts.get(k, 0)}" for k in ("verified", "strong", "published_inbox", "guessed", "fallback", "none", "apply_only", "no_domain")))
     print(f"Written: {write_contacts_csv(store, Path(args.out) / 'contacts.csv')}")
+    return 0
+
+
+def _mmss(seconds: float) -> str:
+    seconds = int(seconds)
+    return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m" if seconds >= 3600 else f"{seconds // 60}m{seconds % 60:02d}s"
+
+
+def cmd_pool(args, profile, store) -> int:
+    from applyflow.outreach import parse_day
+    from applyflow.pool import build_pool, rescore
+    from applyflow.report import write_pool_csv
+    day = parse_day(args.date)
+    if args.rescore:
+        scored = rescore(store, profile, day)
+        print(f"Re-scored {len(scored)} pool companies (selection kept).")
+    else:
+        print("Building the outreach pool from every source (robots.txt respected, 1 request/second/host)...")
+        summary = build_pool(store, _client(profile, args.min_interval), profile, day)
+        scored = summary.scored
+        print("\nCompanies per source (before dedupe):")
+        for k, v in summary.per_source.items():
+            print(f"  {k:<34} {v:>5}")
+        for k, v in summary.notes.items():
+            print(f"  note {k}: {v}")
+        print(f"Before dedupe: {summary.before_dedupe}; after dedupe by website domain: {summary.after_dedupe}.")
+        print(f"Funding signal within 6 months: {summary.funding['6m']}; within 12 months: {summary.funding['12m']}.")
+    selected = [s for s in scored if s.selected]
+    india = sum(s.company.region == "india" for s in selected)
+    print(f"Selected {len(selected)} for outreach ({india} India, {len(selected) - india} remote-global); "
+          f"role / manual targets come on top.")
+    print("\nTop 20 by hiring likelihood:")
+    for s in scored[:20]:
+        print(f"  {s.score:>3}  {s.company.name:<28} {s.company.region:<13} {'; '.join(s.reasons)}")
+    print(f"\nWritten: {write_pool_csv(scored, Path(args.out) / 'pool.csv')}")
+    return 0
+
+
+def cmd_verify_sources(args, profile, store) -> int:
+    from applyflow.contacts import verify_sources
+    print("Checking that every published / verified address appears on the company's own site...")
+    results = verify_sources(store, _client(profile, args.min_interval), profile, log=print)
+    counts: dict[str, int] = {}
+    for r in results:
+        counts[r.status] = counts.get(r.status, 0) + 1
+    print("\n" + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+    for r in results:
+        if r.status == "demoted":
+            print(f"  DEMOTED {r.company}: {r.email} - {r.note}")
     return 0
 
 
@@ -279,6 +343,9 @@ def cmd_queue(args, profile, store) -> int:
     tier3 = sum(it.send_tier == 3 for it in batch.items)
     print(f"Tier 3 (guessed addresses) {batch.gate.reason}.")
     print(f"  {tier3} in this batch, {batch.tier3_held} held back.")
+    if batch.held_earlier:
+        print(f"{batch.held_earlier} ready target(s) left out: already in an earlier day's stored queue, not yet "
+              "marked sent.")
     if batch.skipped_same_company:
         print(f"{batch.skipped_same_company} skipped: another target for the same company is queued.")
     print("Send them from the report (Open in Gmail), then `mark-sent --batch "
@@ -491,8 +558,20 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("contacts", help="find the best person to email at each outreach target (Phase 2a)")
     p.add_argument("--company", help="only targets whose name contains this")
     p.add_argument("--force", action="store_true", help="look up again even if checked recently")
+    p.add_argument("--limit", type=int, default=0, help="look up at most N targets this run (resumable)")
+    p.add_argument("--retry-unread", action="store_true",
+                   help="also redo lookups that read no page of the site (network drop, failing site)")
     p.add_argument("--out", default=str(config.OUTPUT_DIR))
     p.set_defaults(func=cmd_contacts)
+
+    p = sub.add_parser("pool", help="Phase 2c: collect companies from every source, score hiring likelihood, select ~400")
+    p.add_argument("--rescore", action="store_true", help="score the stored pool again without fetching")
+    p.add_argument("--date", help="score as of this day (YYYY-MM-DD, default today)")
+    p.add_argument("--out", default=str(config.OUTPUT_DIR))
+    p.set_defaults(func=cmd_pool)
+
+    p = sub.add_parser("verify-sources", help="confirm each published address on the company's site; demote if not")
+    p.set_defaults(func=cmd_verify_sources)
 
     p = sub.add_parser("explain-contact", help="every contact candidate for a company, and why the primary won")
     p.add_argument("company")

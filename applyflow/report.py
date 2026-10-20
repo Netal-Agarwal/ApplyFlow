@@ -79,10 +79,11 @@ def write_companies_csv(rows: list[Row], path: Path) -> Path:
     return path
 
 
-_CONTACT_COLUMNS = ["name", "role", "email", "confidence", "alternates", "mx", "linkedin_search", "google_search"]
+_CONTACT_COLUMNS = ["name", "role", "email", "confidence", "alternates", "mx", "source_url", "proof",
+                    "linkedin_search", "google_search"]
 CONTACT_FIELDS = (
-    ["target_type", "company", "domain", "team_size", "roles", "best_score", "status"]
-    + [f"primary_{c}" for c in _CONTACT_COLUMNS] + ["primary_source", "primary_source_url"]
+    ["target_type", "company", "domain", "team_size", "roles", "best_score", "hiring_likelihood", "status"]
+    + [f"primary_{c}" for c in _CONTACT_COLUMNS] + ["primary_source"]
     + [f"backup1_{c}" for c in _CONTACT_COLUMNS] + [f"backup2_{c}" for c in _CONTACT_COLUMNS] + ["notes"]
 )
 
@@ -94,16 +95,20 @@ def _contact_cells(c: Row, company: str) -> dict[str, str]:
     return {"name": c["name"] or "", "role": c["role"] or "", "email": c["email"], "confidence": c["confidence"],
             "alternates": "; ".join(json.loads(c["alternates"] or "[]")),
             "mx": "unchecked" if c["mx"] == "unchecked" else (c["mx"] or ""),
+            "source_url": c["source_url"] or "", "proof": (c["proof"] if "proof" in c.keys() else "") or "",
             "linkedin_search": linkedin, "google_search": google}
 
 
 def write_contacts_csv(store, path: Path) -> Path:
     """One row per target company: primary contact plus up to two backups (Phase 2a)."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    pool = {r["key"]: r for r in store.pool_rows()}
+    pool_domains = store.pool_by_domain()
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=CONTACT_FIELDS)
         writer.writeheader()
         for check in store.contact_checks():
+            hl = pool.get(check["company_key"]) or pool_domains.get(check["domain"] or "")
             contacts = store.contacts_for(check["company_key"])
             details = json.loads(check["details"] or "{}")
             row = {
@@ -112,6 +117,7 @@ def write_contacts_csv(store, path: Path) -> Path:
                 "team_size": "" if check["team_size"] is None else check["team_size"],
                 "roles": "; ".join(json.loads(check["roles"] or "[]")),
                 "best_score": "" if check["best_score"] is None else check["best_score"],
+                "hiring_likelihood": hl["score"] if hl else "",
                 "status": check["status"],
                 "notes": " | ".join(details.get("reasons", [])) if not contacts else "",
             }
@@ -119,7 +125,7 @@ def write_contacts_csv(store, path: Path) -> Path:
                 prefix = "primary" if i == 0 else f"backup{i}"
                 row.update({f"{prefix}_{k}": v for k, v in _contact_cells(c, check["company"]).items()})
                 if i == 0:
-                    row.update({"primary_source": c["source"], "primary_source_url": c["source_url"] or ""})
+                    row["primary_source"] = c["source"]
             writer.writerow(row)
     return path
 
@@ -134,7 +140,34 @@ def write_csv(rows: list[Row], path: Path) -> Path:
     return path
 
 
-OUTBOX_FIELDS = ["priority", "target_id", "company", "type", "why", "status", "send_tier", "in_batch", "to",
+POOL_FIELDS = ["rank", "score", "selected", "why_selected", "name", "website", "region", "sources", "team_size",
+               "locations", "batch", "founded_year", "funding_round", "funding_amount", "funding_date", "funding_source",
+               "description", "reasons"]
+
+
+def write_pool_csv(scored, path: Path) -> Path:
+    """Phase 2c: every pool company with its hiring-likelihood score and why."""
+    from applyflow.sources import latest_funding
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=POOL_FIELDS)
+        writer.writeheader()
+        for s in scored:
+            c = s.company
+            f = latest_funding(c)
+            writer.writerow({
+                "rank": s.rank, "score": s.score, "selected": "yes" if s.selected else "", "why_selected": s.why_selected,
+                "name": c.name, "website": c.website, "region": c.region, "sources": "; ".join(c.sources),
+                "team_size": "" if c.team_size is None else c.team_size, "locations": c.locations, "batch": c.batch,
+                "founded_year": c.founded_year or "", "funding_round": f.round if f else "",
+                "funding_amount": f.amount if f else "", "funding_date": f.date if f else "",
+                "funding_source": f.source_url if f else "", "description": c.description,
+                "reasons": " | ".join(s.reasons)})
+    return path
+
+
+OUTBOX_FIELDS = ["priority", "target_id", "company", "type", "why", "hiring_likelihood", "status", "send_tier",
+                 "in_batch", "to",
                  "contact_name", "contact_role", "confidence", "backups", "subject", "body", "resume_action",
                  "draft_source", "validation_notes", "sent_date", "gmail_url"]
 
@@ -149,7 +182,8 @@ def write_outbox_csv(items, batch_ids: set[str], path: Path) -> Path:
             a, d = it.address, it.draft
             writer.writerow({
                 "priority": it.priority, "target_id": it.target_id, "company": it.company, "type": it.kind,
-                "why": it.why, "status": it.status, "send_tier": it.send_tier or "",
+                "why": it.why, "hiring_likelihood": "" if it.hl_score is None else it.hl_score,
+                "status": it.status, "send_tier": it.send_tier or "",
                 "in_batch": "yes" if it.target_id in batch_ids else "",
                 "to": it.sent_email or (a.email if a else ""), "contact_name": a.name if a else "",
                 "contact_role": a.role if a else "", "confidence": a.confidence if a else "",
@@ -189,6 +223,11 @@ def _outreach_card(it, in_batch: bool) -> str:
         contact += f'<div class="line muted"><b>Bounced:</b> {e(", ".join(it.bounced))}</div>'
     links = " · ".join(f'<a href="{e(url)}" target="_blank" rel="noopener">{e(label)}</a>'
                        for label, url in it.manual_links)
+    if a and a.proof:
+        contact += f'<div class="line muted"><b>Source proof:</b> {e(a.proof)}</div>'
+    if it.hl_score is not None:
+        contact += (f'<details><summary>Hiring likelihood {it.hl_score}/100</summary><ul>'
+                    + "".join(f"<li>{e(r)}</li>" for r in it.hl_reasons) + "</ul></details>")
     notes = d.failures or d.template_failures
     source = "Claude-written" if d.source == "claude" else "template"
     note_html = ""

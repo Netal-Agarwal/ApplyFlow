@@ -1,0 +1,18 @@
+[
+  {"id": 1, "name": "Ledgerly", "slug": "ledgerly", "website": "https://www.ledgerly.in", "status": "Active", "isHiring": false,
+   "team_size": 24, "batch": "Winter 2025", "all_locations": "Bengaluru, KA, India", "regions": ["India", "South Asia"],
+   "one_liner": "Reconciliation APIs for Indian SMB finance teams", "industries": ["Fintech"], "tags": ["SaaS", "API"],
+   "launched_at": 1730000000},
+  {"id": 2, "name": "OldChai", "slug": "oldchai", "website": "https://oldchai.in", "status": "Inactive", "isHiring": false,
+   "team_size": 5, "batch": "Summer 2015", "all_locations": "Pune, MH, India", "regions": ["India"], "one_liner": "Tea delivery"},
+  {"id": 3, "name": "Driftwork", "slug": "driftwork", "website": "https://driftwork.dev", "status": "Active", "isHiring": true,
+   "team_size": 45, "batch": "Summer 2023", "all_locations": "Remote", "regions": ["Remote", "Fully Remote"],
+   "one_liner": "Developer tools for API testing", "industries": ["B2B"], "tags": ["Developer Tools"]},
+  {"id": 4, "name": "BigRemote", "slug": "bigremote", "website": "https://bigremote.com", "status": "Active", "isHiring": true,
+   "team_size": 400, "batch": "Winter 2018", "all_locations": "Remote", "regions": ["Fully Remote"], "one_liner": "HR software"},
+  {"id": 5, "name": "Valley Only", "slug": "valley-only", "website": "https://valleyonly.com", "status": "Active", "isHiring": true,
+   "team_size": 30, "batch": "Summer 2024", "all_locations": "San Francisco, CA, USA", "regions": ["America / Canada", "Remote"],
+   "one_liner": "AI for dentists"},
+  {"id": 6, "name": "Masala Box", "slug": "masala-box", "website": "https://masalabox.in", "status": "Active", "isHiring": null,
+   "team_size": 8, "batch": "", "all_locations": "", "regions": ["India"], "one_liner": "D2C spice brand", "launched_at": 1500000000}
+]

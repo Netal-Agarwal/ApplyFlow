@@ -47,6 +47,18 @@ _CLICKBAIT = re.compile(r"!|\burgent\b|\bquick question\b|^\s*(?:re|fwd?):|\bdon
 _PLACEHOLDER = re.compile(r"[\[\]{}<>]|\b(?:TODO|TBD|XXX+|FIXME|lorem ipsum|first_?name|company_?name|"
                           r"your name here|insert)\b", re.I)
 _TIMEZONE = re.compile(r"time[- ]?zones?", re.I)
+# A sentence about the company's own fundraise (Phase 2c): only allowed with a sourced funding signal.
+# "raises the bar" isn't about money: a raise counts only next to an amount or round word.
+_FUNDING_TALK = re.compile(r"\b(?:raised|raising|raises?|raise)\b[^.!?]{0,40}?(?:\$|₹|\b(?:rs|inr|usd|mn|million|"
+                           r"crore|cr|round|series|seed|funding|capital|investors?)\b)|\bfund-?raise\b|"
+                           r"\bfundraising\b|\bfunding round\b|\bseed round\b|\bseries [a-f]\b|\bpre-?seed\b|"
+                           r"\bpre-series\b|\bcongratulations on (?:the|your) (?:recent )?(?:raise|round|funding|series|"
+                           r"seed|pre)", re.I)
+_ROUND_WORDS = re.compile(r"\b(pre-?series [a-f]|series [a-f]|pre-?seed|seed|angel|bridge)\b", re.I)
+_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+           "november", "december"]
+_MONTH_YEAR = re.compile(r"\b(" + "|".join(_MONTHS) + r"|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\.?\s+"
+                         r"(20\d\d)\b", re.I)
 # Words that mark a sentence as being about the company / the posting, not about me.
 _ABOUT_THEM = re.compile(r"\b(?:you|your|yours|the role|this role|the team|the posting|the job|the stack|"
                          r"you're|you've)\b", re.I)
@@ -228,6 +240,9 @@ class DraftInputs:
     locations: str = ""
     note: str = ""                  # add-target --note
     remote_global: bool = False
+    rules: str = "2c"               # "2b": already scheduled under the pre-2c greeting / subject rules
+    funding: dict[str, str] = field(default_factory=dict)   # sourced round: round, amount, date, source_url
+    hl_score: int | None = None     # hiring likelihood (pool), for packets
 
     @property
     def first_name(self) -> str:
@@ -239,13 +254,53 @@ class DraftInputs:
         return first.capitalize() if first.isupper() and len(first) > 2 else first
 
     @property
+    def shared_inbox(self) -> bool:
+        """The address is an inbox (founders@, careers@, hello@ ...), not one person's."""
+        from applyflow.contacts import shared_inbox
+        return bool(self.to_email) and shared_inbox(self.to_email)
+
+    @property
+    def routable_inbox(self) -> bool:
+        """hello@ / hi@ / team@ / info@ / contact@: whoever triages it needs a subject that says 'application'."""
+        from applyflow.contacts import routable_inbox
+        return self.rules != "2b" and bool(self.to_email) and routable_inbox(self.to_email)
+
+    @property
     def greeting(self) -> str:
-        return f"Hi {self.first_name}," if self.first_name else f"Hi {self.company} team,"
+        """'Hi <First>,' for a named person; 'Hi <Company> team,' for a shared inbox; 'Hi,' for a personal
+        address whose owner's name isn't known (2c). Drafts locked to 2b keep 'Hi <Company> team,'."""
+        if self.first_name:
+            return f"Hi {self.first_name},"
+        if self.rules == "2b" or not self.to_email or self.shared_inbox:
+            return f"Hi {self.company} team,"
+        return "Hi,"
 
     def source_text(self) -> str:
-        """What the company itself published: the posting, its one-liner and site text."""
+        """What the company itself published: the posting, its one-liner and site text (and a sourced funding
+        round, so its amount and date may be quoted)."""
+        funding = " ".join(self.funding.get(k, "") for k in ("round", "amount", "date")) if self.funding else ""
         return "\n".join([self.company, self.role_title, self.role_text, self.one_liner, self.homepage_title,
-                          self.meta_description, self.homepage_snippet, self.note, self.batch])
+                          self.meta_description, self.homepage_snippet, self.note, self.batch, funding])
+
+    def focus_word(self) -> str:
+        """Backend / AI / Full-stack / Cloud: the role word for an application subject, by fit."""
+        if self.role_family:
+            fam = self.role_family.lower()
+            if "ai" in fam or "ml" in fam or "data" in fam:
+                return "AI"
+            if "full" in fam:
+                return "Full-stack"
+            if "cloud" in fam or "platform" in fam or "devops" in fam:
+                return "Cloud"
+            return "Backend"
+        text = " ".join([self.one_liner, self.meta_description, self.homepage_title, self.role_title]).lower()
+        if re.search(r"\b(ai|llm|llms|genai|agents?|agentic|machine learning|ml|voice ai|computer vision)\b", text):
+            return "AI"
+        if re.search(r"\b(cloud|devops|kubernetes|observability|serverless|data centers?)\b", text):
+            return "Cloud"
+        if re.search(r"\b(marketplace|consumer app|mobile app|web app|e-?commerce|storefront)\b", text):
+            return "Full-stack"
+        return "Backend"
 
 
 def display_company(name: str) -> str:
@@ -402,7 +457,10 @@ def template_draft(inputs: DraftInputs, facts: Facts, min_words: int = 120, max_
         else:
             s.append(_Sentence(0, f"I'm writing because I'd like to work with the engineering team at {c}.", order=1))
         s.append(_Sentence(1, f"My main focus is {facts.focus}, and I could help {c} with API and service work on "
-                              f"the product.", order=0))
+                              f"the product.", order=0, short=f"My main focus is {facts.focus}."))
+        line = funding_line(inputs)
+        if line:
+            s.append(_Sentence(0, line, "preferred", 2))
     if project:
         lead = "The closest match from my work is" if inputs.kind == "role" else "Most recently I built"
         s.append(_Sentence(1, f"{lead} {project.name}, {project.detail}.", order=1,
@@ -422,16 +480,20 @@ def template_draft(inputs: DraftInputs, facts: Facts, min_words: int = 120, max_
     s.append(_Sentence(2, _availability(inputs, facts), order=0))
     if inputs.remote_global:
         s.append(_Sentence(2, "I'm comfortable working across time zones and keeping regular overlap with the team.",
-                           order=1))
+                           order=1, short="I'm comfortable working across time zones."))
     resume_line = "I've attached my resume." if action == "attach" else "My resume is linked below."
     if inputs.kind == "role":
         s.append(_Sentence(3, f"{resume_line} If my background fits what you need, I'd be happy to talk "
                               f"whenever it suits you.", order=0))
     else:
         s.append(_Sentence(3, f"Would {c} be open to a January 2027 intern or a 2027 new grad? If not, I'd still "
-                              f"welcome a short chat about where I could help. {resume_line}", order=0))
+                              f"welcome a short chat about where I could help. {resume_line}", order=0,
+                           short=f"Would you be open to a January 2027 intern or a 2027 new grad? If not, I'd still "
+                                 f"welcome a short chat. {resume_line}"))
     body = _assemble(inputs, facts, s, min_words, max_words)
-    if inputs.kind == "role":
+    if inputs.routable_inbox:
+        subject = application_subject(inputs, facts)
+    elif inputs.kind == "role":
         subject = f"{inputs.role_title} - {facts.signature_title}"
     else:
         subject = f"January 2027 intern or 2027 new grad at {c}?"
@@ -439,6 +501,60 @@ def template_draft(inputs: DraftInputs, facts: Facts, min_words: int = 120, max_
                   resume_reason=action_reason, project=project.name if project else "", project_reason=project_reason)
     draft.template_failures = validate(subject, body, inputs, facts, action, min_words, max_words, terms or [])
     return draft
+
+
+def application_subject(inputs: DraftInputs, facts: Facts) -> str:
+    """A subject a shared inbox (hello@ / info@ ...) routes as an application, e.g.
+    'Internship / new-grad application – Netal Agarwal (Backend, Jan 2027)'."""
+    if inputs.kind == "role" and inputs.role_title:
+        subject = f"{inputs.role_title} application – {facts.name} (Jan 2027)"
+        if len(subject) <= 90:
+            return subject
+    return f"Internship / new-grad application – {facts.name} ({inputs.focus_word()}, Jan 2027)"
+
+
+def _month_year(day: str) -> str:
+    try:
+        y, m = int(day[:4]), int(day[5:7])
+        return f"{_MONTHS[m - 1].capitalize()} {y}"
+    except (ValueError, IndexError):
+        return ""
+
+
+def funding_line(inputs: DraftInputs) -> str:
+    """A congratulations line for a sourced round within 6 months, worded only from the signal."""
+    f = inputs.funding
+    if not f or not f.get("source_url") or not f.get("recent"):
+        return ""
+    r = (f.get("round") or "").strip()
+    named = f"the {r}" if re.search(r"series|round", r, re.I) else (f"the {r.lower()} round" if r else "the recent funding round")
+    when = _month_year(f.get("date", ""))
+    return f"Congratulations on {named}" + (f" announced in {when}." if when else ".")
+
+
+def funding_failures(message: str, inputs: DraftInputs) -> list[str]:
+    """A draft may mention the company's fundraise only with a sourced signal, and must state it accurately.
+    Funding words the company uses about its own product ("the fundraising platform for schools") don't count."""
+    own = " ".join([inputs.one_liner, inputs.meta_description, inputs.homepage_title, inputs.homepage_snippet])
+    if not any(not contains_phrase(own, m.group(0)) for m in _FUNDING_TALK.finditer(message)):
+        return []
+    f = inputs.funding
+    if not f or not f.get("source_url"):
+        return ["mentions funding, but there's no sourced funding signal for this company (never invent one)"]
+    out = []
+    signal_round = (f.get("round") or "").lower().replace("-", " ")
+    # Only sentences about the raise are checked ("available from January 2027" isn't about it).
+    message = " ".join(s for s in re.split(r"(?<=[.!?])\s+|\n+", message)
+                       if _FUNDING_TALK.search(s) or re.search(r"\b(round|announced|investors?)\b", s, re.I))
+    for m in _ROUND_WORDS.finditer(message):
+        said = m.group(1).lower().replace("-", " ")
+        if not signal_round or said not in signal_round:
+            out.append(f"says '{m.group(1)}', but the funding signal's round is '{f.get('round') or 'not stated'}'")
+    for m in _MONTH_YEAR.finditer(message):
+        said_month = m.group(1).lower()[:3]
+        if not f.get("date") or (said_month, m.group(2)) != (_MONTHS[int(f['date'][5:7]) - 1][:3], f["date"][:4]):
+            out.append(f"says '{m.group(0)}', but the round was reported {f.get('date') or 'on an unknown date'}")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -489,7 +605,18 @@ def validate(subject: str, body: str, inputs: DraftInputs, facts: Facts, action:
 
     greeting, message, signature, signoff = split_body(body)
     if greeting != inputs.greeting:
-        failures.append(f"greeting is '{greeting}', expected '{inputs.greeting}'")
+        if inputs.rules != "2b" and inputs.to_email and not inputs.shared_inbox and greeting.endswith(" team,"):
+            failures.append(f"greeting is '{greeting}', but {inputs.to_email} is a person's address: "
+                            f"'Hi <Company> team,' is only for shared inboxes (expected '{inputs.greeting}')")
+        elif inputs.rules != "2b" and inputs.shared_inbox and not greeting.endswith(" team,"):
+            failures.append(f"greeting is '{greeting}', but {inputs.to_email} is a shared inbox "
+                            f"(expected '{inputs.greeting}')")
+        else:
+            failures.append(f"greeting is '{greeting}', expected '{inputs.greeting}'")
+    if inputs.routable_inbox and subject and not ("application" in subject.lower() and facts.name.lower() in
+                                                  subject.lower()):
+        failures.append(f"{inputs.to_email} is a general inbox: the subject must read as an application and name "
+                        f"the candidate, e.g. '{application_subject(inputs, facts)}'")
     if not signoff:
         failures.append(f"no sign-off line (e.g. '{SIGN_OFF}') before the signature")
     if signature != facts.signature():
@@ -517,6 +644,7 @@ def validate(subject: str, body: str, inputs: DraftInputs, facts: Facts, action:
     for word in BUZZWORDS:
         if contains_phrase(f"{subject}\n{message}", word):
             failures.append(f"buzzword or filler: '{word}'")
+    failures += funding_failures(f"{subject}\n{message}", inputs)
 
     # Facts: every number and named technology must come from the facts, or (for technologies)
     # from the company's own text in a sentence about them ("your stack uses Go").
@@ -547,7 +675,7 @@ def check_written(subject: str, body: str, inputs: DraftInputs, facts: Facts, mi
 WRITTEN_FORMAT = """Subject: <one line>
 
 Body:
-Hi <FirstName>,            (or: Hi <Company> team,)
+Hi <FirstName>,            (or: Hi <Company> team, / Hi, - as the packet says)
 
 <120-160 words>
 
@@ -598,8 +726,9 @@ Write one email per packet, to `output/drafts/written/<id>.md`, then run
 no buzzwords ("passionate", "cutting-edge", "leverage", "synergy", "game-changer", "world-class"),
 no flattery filler ("huge fan", "amazing", "dream company"), no "I hope this email finds you well".
 
-**Greeting.** Exactly the greeting the packet gives: "Hi <FirstName>," for a named person,
-"Hi <Company> team," for an inbox.
+**Greeting.** Exactly the greeting the packet gives: "Hi <FirstName>," for a named person (from the
+post, page or an unambiguous handle), "Hi," for a person's address whose name isn't known, and
+"Hi <Company> team," only for a shared inbox (founders@, careers@, hello@, info@ ...).
 
 **Length.** 120-160 words between the greeting and the sign-off (the signature doesn't count).
 
@@ -630,7 +759,12 @@ no flattery filler ("huge fan", "amazing", "dream company"), no "I hope this ema
   those facts; a technology from the company's own text is fine only in a sentence about them
   ("your stack uses Go"), never as a skill claim.
 - Subject: short and specific (role + who I am, or the intern / new-grad question). No "!",
-  "urgent", "quick question", "Re:".
+  "urgent", "quick question", "Re:". To a general inbox (hello@ / hi@ / team@ / info@ / contact@) the
+  subject must read as an application and name me, e.g. "Internship / new-grad application – Netal
+  Agarwal (Backend, Jan 2027)", with the role word (Backend / AI / Full-stack / Cloud) fitting the company.
+  founders@ and personal addresses keep the conversational subjects.
+- Funding: mention a raise (e.g. congratulate them) only when the packet lists a sourced funding signal,
+  and state its round and month exactly as given. Never infer or invent one.
 - End with the sign-off and the signature exactly as the packet gives them.
 - No brackets or placeholders left in the text.
 """
@@ -659,7 +793,8 @@ def render_packet(inputs: DraftInputs, draft: Draft, facts: Facts, meta: dict[st
               f"- Homepage title: {inputs.homepage_title or '-'}",
               f"- Meta description: {inputs.meta_description or '-'}",
               f"- Team size: {inputs.team_size if inputs.team_size is not None else 'unknown'}"
-              + (f" · YC {inputs.batch}" if inputs.batch else "") + (f" · {inputs.locations}" if inputs.locations else "")]
+              + (f" · YC {inputs.batch}" if inputs.batch else "") + (f" · {inputs.locations}" if inputs.locations else ""),
+              f"- Hiring likelihood: {inputs.hl_score if inputs.hl_score is not None else '-'}"]
     if inputs.note:
         lines.append(f"- Your note (add-target): {inputs.note}")
     lines += ["", "Homepage text (snippet):", "", "> " + (inputs.homepage_snippet or "(none fetched)").replace("\n", "\n> ")]
@@ -672,9 +807,21 @@ def render_packet(inputs: DraftInputs, draft: Draft, facts: Facts, meta: dict[st
                   f"- Skills it matched: {', '.join(inputs.role_skills) or '-'}", "",
                   "Posting text (first 2,500 characters):", "",
                   "> " + inputs.role_text[:2500].strip().replace("\n", "\n> ")]
+    if inputs.funding:
+        f = inputs.funding
+        lines += ["", "## Funding signal (sourced)", "",
+                  f"- {f.get('round') or 'round not stated'} · {f.get('amount') or 'amount not stated'} · reported "
+                  f"{f.get('date')} · {f.get('source_url')}",
+                  "- You may congratulate them on it" + (" (within 6 months)." if f.get("recent") else
+                                                         " - it's 6-12 months old, so only if it reads naturally."),
+                  "  State the round and month exactly as above."]
+    else:
+        lines += ["", "## Funding signal", "", "- None sourced: don't mention funding."]
     lines += ["", "## Rules for this draft", "",
               f"- Greeting exactly: `{inputs.greeting}`",
               f"- resume_action: **{draft.resume_action}** ({draft.resume_reason})",
+              f"- Subject: " + (f"general inbox - must read as an application, e.g. `{application_subject(inputs, facts)}`"
+                                if inputs.routable_inbox else "conversational (role + who I am, or the intern question)"),
               f"- Time-zone line: {'required (remote / multi-country)' if inputs.remote_global else 'not needed'}",
               f"- Best-matching project: {draft.project or '-'} ({draft.project_reason})",
               f"- {meta.get('min_words', 120)}-{meta.get('max_words', 160)} words between the greeting and the sign-off",
