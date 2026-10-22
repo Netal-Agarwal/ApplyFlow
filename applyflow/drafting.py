@@ -2,10 +2,13 @@
 
 Two kinds of email:
   * role email (the target has an A/B opening): name the role, one line about the company,
-    the best-matching project with one concrete detail, availability, a low-pressure ask.
+    the middle section, availability, a low-pressure ask.
   * general outreach (no opening, and manual targets): what stood out about the company,
-    what I could contribute, and whether they're open to a January 2027 intern / 2027 new
-    grad, or a short chat.
+    what I could contribute, the middle section, and whether they're open to a January 2027
+    intern / 2027 new grad, or a short chat.
+The middle section (2d format): the two projects that best match the company, one sentence each,
+the credentials line (internship + patent), and a skills line ("Day to day I work in ...") of 4-7
+skills from the facts. Drafts already queued or sent before 2d keep their own rules (`LEGACY_RULES`).
 
 Every target gets a template draft that reads naturally even with almost no company
 information. `draft-pack` writes a packet per target (every input plus a style guide); a
@@ -25,6 +28,23 @@ from applyflow.config import Profile
 from applyflow.text import contains_phrase
 
 SIGN_OFF = "Best regards,"
+# Rule sets: "2b" (scheduled before Phase 2c), "2c" (queued or sent before the 2d format), "2d" (current).
+LEGACY_RULES = {"2b", "2c"}
+LEGACY_WORDS = (120, 160)
+MIN_SKILLS, MAX_SKILLS = 4, 7
+_SKILLS_LINE = re.compile(r"\bday[- ]to[- ]day,?\s+I\s+work\s+(?:in|with)\s+((?:[^.!?\n]|\.(?=\w))+)", re.I)   # "Node.js" isn't a full stop
+# Which kind of team a company is (DraftInputs.focus_word) -> the facts' skills it most likely uses,
+# and the project keywords that suit it (a small tie-break below what the company's own text says).
+FOCUS_SKILLS = {"Backend": ["Python", "FastAPI", "PostgreSQL", "REST APIs", "SQLAlchemy", "AWS Lambda", "Flask"],
+                "AI": ["Python", "FastAPI", "Flask", "PostgreSQL", "Neo4j", "REST APIs", "React"],
+                "Cloud": ["AWS Lambda", "API Gateway", "DynamoDB", "S3", "Python", "serverless", "CloudWatch"],
+                "Full-stack": ["React", "JavaScript", "Node.js", "FastAPI", "PostgreSQL", "Python", "REST APIs"]}
+FOCUS_KEYWORDS = {"Backend": ["backend", "api", "cloud", "serverless"], "AI": ["ai", "nlp", "llm", "ml"],
+                  "Cloud": ["cloud", "aws", "serverless", "infrastructure"],
+                  "Full-stack": ["full stack", "product", "platform"]}
+# Facts skills too general to pick from a word on a company's site.
+_SITE_SKILL_NOISE = {"git", "system design", "event-driven", "iam", "microservices", "serverless", "aws", "sql",
+                     "rest apis", "java", "c++"}
 SIGN_OFFS = ("Best regards,", "Best,", "Kind regards,", "Warm regards,", "Regards,", "Thanks,", "Thank you,",
              "Many thanks,")
 
@@ -89,6 +109,11 @@ class Project:
     stack: str = ""
     detail: str = ""
     keywords: list[str] = field(default_factory=list)
+    short: str = ""                  # one-sentence detail for the two-project middle section (2d)
+
+    @property
+    def summary(self) -> str:
+        return self.short or self.detail
 
 
 @dataclass
@@ -144,11 +169,12 @@ class Facts:
             marks.append(("patent", "patent"))
         return marks
 
-    def signature(self) -> list[str]:
+    def signature(self, resume: bool = True) -> list[str]:
+        """The signature; without the resume link when the resume is attached (2d: never both)."""
         lines = [self.name, self.signature_title, self.phone,
                  f"LinkedIn: {self.linkedin_url}" if self.linkedin_url else "",
                  f"GitHub: {self.github_url}" if self.github_url else "",
-                 f"Resume: {self.resume_url}" if self.resume_url else ""]
+                 f"Resume: {self.resume_url}" if self.resume_url and resume else ""]
         return [ln for ln in lines if ln]
 
     def listing(self) -> list[str]:
@@ -192,7 +218,8 @@ def load_facts(profile: Profile) -> Facts:
         internship=str(raw.get("internship") or ""), full_time=str(raw.get("full_time") or ""),
         focus=str(raw.get("focus") or ""), skills=[str(s) for s in raw.get("skills") or []],
         projects=[Project(name=str(p.get("name") or ""), stack=str(p.get("stack") or ""),
-                          detail=str(p.get("detail") or ""), keywords=[str(k).lower() for k in p.get("keywords") or []])
+                          detail=str(p.get("detail") or ""), keywords=[str(k).lower() for k in p.get("keywords") or []],
+                          short=str(p.get("short") or ""))
                   for p in raw.get("projects") or [] if p.get("name")],
         experience=[{k: str(v) for k, v in e.items()} for e in raw.get("experience") or []],
         patent={k: str(v or "") for k, v in (raw.get("patent") or {}).items()},
@@ -240,7 +267,7 @@ class DraftInputs:
     locations: str = ""
     note: str = ""                  # add-target --note
     remote_global: bool = False
-    rules: str = "2c"               # "2b": already scheduled under the pre-2c greeting / subject rules
+    rules: str = "2d"               # "2b" / "2c": queued or sent under an older rule set (LEGACY_RULES)
     funding: dict[str, str] = field(default_factory=dict)   # sourced round: round, amount, date, source_url
     hl_score: int | None = None     # hiring likelihood (pool), for packets
 
@@ -252,6 +279,11 @@ class DraftInputs:
             return ""
         first = words[0]
         return first.capitalize() if first.isupper() and len(first) > 2 else first
+
+    @property
+    def legacy(self) -> bool:
+        """Queued or sent before the 2d format: one project, 120-160 words, resume link always in the signature."""
+        return self.rules in LEGACY_RULES
 
     @property
     def shared_inbox(self) -> bool:
@@ -355,6 +387,86 @@ def choose_project(inputs: DraftInputs, facts: Facts) -> tuple[Project | None, s
     return best, (f"company text mentions {', '.join(found[:4])}" if found else "default (backend) project")
 
 
+def choose_projects(inputs: DraftInputs, facts: Facts) -> tuple[list[Project], list[str]]:
+    """The two projects that best match this company (2d), best first, with a reason for each: the posting's
+    stack and the role family's lead project for a role email, else the project keywords the company's own
+    text mentions; the kind of team it is (focus_word) breaks ties, then the facts' order."""
+    focus = FOCUS_KEYWORDS.get(inputs.focus_word(), [])
+    about = " ".join([inputs.one_liner, inputs.meta_description, inputs.homepage_title, inputs.note])
+
+    def why(p: Project) -> tuple[float, list[str]]:
+        score, reasons = 0.0, []
+        if inputs.kind == "role":
+            overlap = [s for s in inputs.role_skills if contains_phrase(p.stack, _canonical(s))]
+            if p.name == inputs.lead_project:
+                score += 2
+                reasons.append(f"lead project for the {inputs.role_family or 'role'} family")
+            if overlap:
+                score += len(overlap)
+                reasons.append(f"shares the posting's {', '.join(overlap)}")
+        hits = [k for k in p.keywords if contains_phrase(about, k)]
+        if hits:
+            score += len(hits)
+            reasons.append(f"company text mentions {', '.join(hits[:4])}")
+        fit = [k for k in focus if k in p.keywords]
+        if fit:
+            score += 0.25 * len(fit)
+            reasons.append(f"suits {_team(inputs.focus_word())}")
+        return score, reasons or ["next in the facts' order"]
+    ranked = sorted(enumerate(facts.projects), key=lambda ip: (-why(ip[1])[0], ip[0]))[:2]
+    return [p for _, p in ranked], [f"{p.name}: {'; '.join(why(p)[1])}" for _, p in ranked]
+
+
+def choose_skills(inputs: DraftInputs, facts: Facts, projects: list[Project]) -> tuple[list[str], list[str]]:
+    """Up to 6 skills from the facts for the skills line, most relevant first: the posting's matched skills,
+    skills the company names in its own text, the usual stack of its kind of team, then the projects' stacks."""
+    by_lower = {s.lower(): s for s in facts.skills}
+    out: list[str] = []
+    reasons: list[str] = []
+
+    def add(names: list[str], why: str) -> None:
+        added = []
+        for n in names:
+            skill = by_lower.get(_canonical(n))
+            if skill and skill not in out and len(out) < MAX_SKILLS - 1:
+                out.append(skill)
+                added.append(skill)
+        if added:
+            reasons.append(f"{', '.join(added)}: {why}")
+    add(shared_skills(inputs, facts) if inputs.kind == "role" else [], "in the posting")
+    own = "\n".join([inputs.role_text, inputs.one_liner, inputs.meta_description, inputs.homepage_title,
+                     inputs.homepage_snippet])
+    add([s for s in facts.skills if s.lower() not in _SITE_SKILL_NOISE and contains_phrase(own, s)],
+        "named in the company's own text")
+    focus = inputs.focus_word()
+    usual = FOCUS_SKILLS.get(focus, [])
+    # Frontend skills only for a full-stack team (or when the company / posting names them, above).
+    frontend = set() if focus == "Full-stack" else {"react", "javascript"}
+
+    def stack(p: Project) -> list[str]:
+        return [s.strip() for s in p.stack.split(",") if s.strip().lower() not in frontend]
+    add(usual[:3], f"the usual stack of {_team(focus)}")
+    add(stack(projects[0]) if projects else [], f"the lead project's stack ({projects[0].name})" if projects else "")
+    add(usual[3:], f"the usual stack of {_team(focus)}")
+    add([s for p in projects[1:] for s in stack(p)], "from the second project")
+    add([s for s in facts.skills if s.lower() not in frontend], "from the skills list")
+    return out, reasons
+
+
+def _team(focus: str) -> str:
+    return f"{'an' if focus == 'AI' else 'a'} {focus} team"
+
+
+def skills_line(skills: list[str]) -> str:
+    listed = ", ".join(skills[:-1]) + f" and {skills[-1]}" if len(skills) > 1 else "".join(skills)
+    return f"Day to day I work in {listed}."
+
+
+def word_range(inputs: DraftInputs, min_words: int, max_words: int) -> tuple[int, int]:
+    """Drafts held to an older rule set keep its 120-160 words."""
+    return LEGACY_WORDS if inputs.legacy else (min_words, max_words)
+
+
 def _clean_about(text: str) -> str:
     """A company one-liner usable inside a sentence, or '' if it's truncated, salesy or too long."""
     text = " ".join((text or "").split()).strip()
@@ -389,6 +501,8 @@ class Draft:
     source: str = "template"                      # template | claude
     project: str = ""
     project_reason: str = ""
+    skills: list[str] = field(default_factory=list)      # the template's skills line (2d)
+    skills_reason: str = ""
     failures: list[str] = field(default_factory=list)            # why a written draft was rejected
     template_failures: list[str] = field(default_factory=list)   # the template's own check (should be empty)
 
@@ -402,13 +516,44 @@ class _Sentence:
     short: str = ""                  # shorter wording, used if the draft is still too long
 
 
+# General-outreach asks (2d): the availability sentence already names both roles, so the ask only points back
+# at them. (full wording, shorter wording); {c} = the company. Picked by target id, so drafts vary.
+CLOSING_ASKS = [
+    ("Would either of these fit {c}'s plans? If the timing doesn't work, I'd still welcome a short conversation.",
+     "Would either fit {c}'s plans? If not, I'd still welcome a short chat."),
+    ("Could either of these be useful to {c} in the coming months? If not, I'd still be glad of a short chat "
+     "about where I could help.", "Could either be useful to {c}? If not, I'd still be glad of a short chat."),
+    ("Is either of these something {c} might have room for? If the timing is off, a short conversation would "
+     "still be welcome.", "Might {c} have room for either? If not, a short chat would still be welcome."),
+]
+# The ask restating the roles after the availability sentence (fails 2d validation).
+_ROLE_RESTATED = re.compile(r"\bjanuary 2027 intern\b|\b2027 new[- ]grads?\b", re.I)
+_AVAILABILITY = re.compile(r"\binternship\b.*\b(?:new[- ]grad|full[- ]time)\b|\b(?:new[- ]grad|full[- ]time)\b.*"
+                           r"\binternship\b", re.I)
+
+
+def closing_ask(inputs: DraftInputs) -> tuple[str, str]:
+    full, short = CLOSING_ASKS[sum(map(ord, inputs.target_id)) % len(CLOSING_ASKS)]
+    return full.format(c=inputs.company), short.format(c=inputs.company)
+
+
+def restated_roles(message: str) -> list[str]:
+    """Role phrases ('January 2027 intern', '2027 new grad') repeated after the availability sentence."""
+    sentences = re.split(r"(?<=[.!?])\s+|\n+", message)
+    at = next((i for i, s in enumerate(sentences) if _AVAILABILITY.search(s)), None)
+    if at is None:
+        return []
+    return [m.group(0) for s in sentences[at + 1:] for m in _ROLE_RESTATED.finditer(s)]
+
+
 def _availability(inputs: DraftInputs, facts: Facts) -> str:
     if inputs.role_track == "new_grad":
         return f"I can join for {facts.full_time}, and I'm also available for {facts.internship}."
     return f"I'm available for {facts.internship}, and for {facts.full_time}."
 
 
-def _assemble(inputs: DraftInputs, facts: Facts, sentences: list[_Sentence], min_words: int, max_words: int) -> str:
+def _assemble(inputs: DraftInputs, facts: Facts, sentences: list[_Sentence], min_words: int, max_words: int,
+              resume: bool = True) -> str:
     """Fit the message into the word range: preferred sentences go first, fillers only when short."""
     chosen = [s for s in sentences if s.kind in ("required", "preferred")]
     fillers = [s for s in sentences if s.kind == "filler"]
@@ -430,11 +575,84 @@ def _assemble(inputs: DraftInputs, facts: Facts, sentences: list[_Sentence], min
     for s in sorted(chosen, key=lambda s: (s.para, s.order)):
         paras.setdefault(s.para, []).append(s.text)
     message = "\n\n".join(" ".join(paras[k]) for k in sorted(paras))
-    return "\n".join([inputs.greeting, "", message, "", SIGN_OFF, *facts.signature()])
+    return "\n".join([inputs.greeting, "", message, "", SIGN_OFF, *facts.signature(resume)])
 
 
-def template_draft(inputs: DraftInputs, facts: Facts, min_words: int = 120, max_words: int = 160,
+def template_draft(inputs: DraftInputs, facts: Facts, min_words: int = 160, max_words: int = 200,
                    terms: list[str] | None = None) -> Draft:
+    if inputs.legacy:
+        return _legacy_template(inputs, facts, terms)
+    projects, project_reasons = choose_projects(inputs, facts)
+    skills, skill_reasons = choose_skills(inputs, facts, projects)
+    action, action_reason = resume_action(inputs)
+    about = company_about(inputs)
+    c = inputs.company
+    intro = (f"I'm {facts.first_name}, a final-year {facts.degree_short} student at {facts.college_short} "
+             f"graduating in {facts.graduation}")
+    s: list[_Sentence] = []
+    if inputs.kind == "role":
+        s.append(_Sentence(0, f"{intro}, and I'd like to be considered for the {inputs.role_title} role at {c}.", order=0))
+        if about:
+            s.append(_Sentence(0, f"What {c} is building ({about}) is the kind of product I'd like to work on.",
+                               "preferred", 1))
+        else:
+            s.append(_Sentence(0, f"The role lines up closely with the backend work I've been doing.", "preferred", 1))
+    else:
+        s.append(_Sentence(0, f"{intro}.", order=0))
+        if about:
+            s.append(_Sentence(0, f"{c} ({about}) caught my attention because it's the kind of product I'd like "
+                                  f"to help build.", order=1))
+        else:
+            s.append(_Sentence(0, f"I'm writing because I'd like to work with the engineering team at {c}.", order=1))
+        s.append(_Sentence(1, f"My main focus is {facts.focus}, and I could help {c} with API and service work on "
+                              f"the product.", "preferred", 0, short=f"My main focus is {facts.focus}."))
+        line = funding_line(inputs)
+        if line:
+            s.append(_Sentence(0, line, "preferred", 2))
+    leads = ["The closest match from my work is" if inputs.kind == "role" else "Most recently I built",
+             "I also built"]
+    for i, (lead, p) in enumerate(zip(leads, projects)):
+        s.append(_Sentence(1, f"{lead} {p.name}, {p.summary}.", order=1 + i,
+                           short=f"{lead} {p.name} ({p.stack})." if p.stack else ""))
+    credentials = facts.credentials()
+    if credentials:
+        s.append(_Sentence(1, credentials, order=8))
+    if facts.experience and facts.experience[0].get("detail"):
+        e = facts.experience[0]
+        s.append(_Sentence(1, f"At {e.get('org_short') or e.get('org', '')}, I {e['detail']}.", "filler", 9))
+    if len(skills) >= MIN_SKILLS:
+        s.append(_Sentence(2, skills_line(skills), order=0))
+    s.append(_Sentence(2, _availability(inputs, facts), order=1))
+    if inputs.remote_global:
+        s.append(_Sentence(2, "I'm comfortable working across time zones and keeping regular overlap with the team.",
+                           order=2, short="I'm comfortable working across time zones."))
+    resume_line = "I've attached my resume." if action == "attach" else "My resume is linked below."
+    if inputs.kind == "role":
+        s.append(_Sentence(3, f"{resume_line} If my background fits what you need, I'd be happy to talk "
+                              f"whenever it suits you.", order=0))
+    else:
+        ask, short = closing_ask(inputs)
+        s.append(_Sentence(3, f"{ask} {resume_line}", order=0, short=f"{short} {resume_line}"))
+    body = _assemble(inputs, facts, s, min_words, max_words, resume=action == "link")
+    draft = Draft(target_id=inputs.target_id, subject=_template_subject(inputs, facts), body=body,
+                  resume_action=action, resume_reason=action_reason,
+                  project=" + ".join(p.name for p in projects), project_reason=" | ".join(project_reasons),
+                  skills=skills, skills_reason=" | ".join(skill_reasons))
+    draft.template_failures = validate(draft.subject, body, inputs, facts, action, min_words, max_words, terms or [])
+    return draft
+
+
+def _template_subject(inputs: DraftInputs, facts: Facts) -> str:
+    if inputs.routable_inbox:
+        return application_subject(inputs, facts)
+    if inputs.kind == "role":
+        return f"{inputs.role_title} - {facts.signature_title}"
+    return f"January 2027 intern or 2027 new grad at {inputs.company}?"
+
+
+def _legacy_template(inputs: DraftInputs, facts: Facts, terms: list[str] | None) -> Draft:
+    """The pre-2d template (one project, 120-160 words), for targets already queued or sent under it."""
+    min_words, max_words = LEGACY_WORDS
     project, project_reason = choose_project(inputs, facts)
     action, action_reason = resume_action(inputs)
     about = company_about(inputs)
@@ -491,12 +709,7 @@ def template_draft(inputs: DraftInputs, facts: Facts, min_words: int = 120, max_
                            short=f"Would you be open to a January 2027 intern or a 2027 new grad? If not, I'd still "
                                  f"welcome a short chat. {resume_line}"))
     body = _assemble(inputs, facts, s, min_words, max_words)
-    if inputs.routable_inbox:
-        subject = application_subject(inputs, facts)
-    elif inputs.kind == "role":
-        subject = f"{inputs.role_title} - {facts.signature_title}"
-    else:
-        subject = f"January 2027 intern or 2027 new grad at {c}?"
+    subject = _template_subject(inputs, facts)
     draft = Draft(target_id=inputs.target_id, subject=subject, body=body, resume_action=action,
                   resume_reason=action_reason, project=project.name if project else "", project_reason=project_reason)
     draft.template_failures = validate(subject, body, inputs, facts, action, min_words, max_words, terms or [])
@@ -588,9 +801,11 @@ def _role_named(title: str, text: str) -> bool:
 
 
 def validate(subject: str, body: str, inputs: DraftInputs, facts: Facts, action: str,
-             min_words: int = 120, max_words: int = 160, terms: list[str] | None = None) -> list[str]:
+             min_words: int = 160, max_words: int = 200, terms: list[str] | None = None) -> list[str]:
     """Every reason this draft can't be used; [] when it passes."""
     failures: list[str] = []
+    min_words, max_words = word_range(inputs, min_words, max_words)
+    attach_only = action == "attach" and not inputs.legacy        # 2d: an attached resume means no link anywhere
     subject = (subject or "").strip()
     if not subject:
         failures.append("subject is empty")
@@ -619,8 +834,12 @@ def validate(subject: str, body: str, inputs: DraftInputs, facts: Facts, action:
                         f"the candidate, e.g. '{application_subject(inputs, facts)}'")
     if not signoff:
         failures.append(f"no sign-off line (e.g. '{SIGN_OFF}') before the signature")
-    if signature != facts.signature():
-        failures.append("signature missing or changed (must be: " + " / ".join(facts.signature()) + ")")
+    expected = facts.signature(resume=not attach_only)
+    if attach_only and facts.resume_url and facts.resume_url in body:
+        failures.append("resume_action is attach, but the resume link is still in the email: remove it from the "
+                        "body and the signature (attached or linked, never both)")
+    elif signature != expected:
+        failures.append("signature missing or changed (must be: " + " / ".join(expected) + ")")
     n = word_count(message)
     if not min_words <= n <= max_words:
         failures.append(f"{n} words between greeting and sign-off (must be {min_words}-{max_words})")
@@ -629,6 +848,8 @@ def validate(subject: str, body: str, inputs: DraftInputs, facts: Facts, action:
     if action == "attach":
         if not re.search(r"\battach", low) or "resume" not in low:
             failures.append("resume_action is attach, but the body doesn't say the resume is attached")
+        if attach_only and re.search(r"\blinked\b|\blink\b[^.]{0,30}\bresume|\bresume\b[^.]{0,30}\blink", low):
+            failures.append("says the resume is linked, but resume_action is attach (attached or linked, never both)")
     else:
         if "resume" not in low:
             failures.append("no resume line (resume_action is link: say it's linked below)")
@@ -637,6 +858,13 @@ def validate(subject: str, body: str, inputs: DraftInputs, facts: Facts, action:
     missing = [label for label, word in facts.credential_marks() if word.lower() not in low]
     if missing:
         failures.append(f"no credentials line (mention the {' and the '.join(missing)})")
+    if not inputs.legacy:
+        failures += middle_failures(message, facts)
+        repeated = restated_roles(message)
+        if repeated:
+            failures.append(f"the ask repeats '{repeated[0]}' after the availability sentence already named the "
+                            f"roles: point back at them instead (e.g. 'Would either of these fit {inputs.company}'s "
+                            f"plans?')")
     if inputs.remote_global and not _TIMEZONE.search(message):
         failures.append("remote / multi-country target, but no line about working across time zones")
     if inputs.kind == "role" and not _role_named(inputs.role_title, f"{subject}\n{message}"):
@@ -663,8 +891,29 @@ def validate(subject: str, body: str, inputs: DraftInputs, facts: Facts, action:
     return failures
 
 
-def check_written(subject: str, body: str, inputs: DraftInputs, facts: Facts, min_words: int = 120,
-                  max_words: int = 160, terms: list[str] | None = None) -> list[str]:
+def middle_failures(message: str, facts: Facts) -> list[str]:
+    """2d middle section: exactly two named projects from the facts and a skills line of 4-7 facts skills."""
+    failures = []
+    named = [p.name for p in facts.projects if contains_phrase(message, p.name)]
+    if len(named) != 2 and len(facts.projects) >= 2:
+        failures.append(f"names {len(named)} project(s) from the facts ({', '.join(named) or 'none'}); name exactly "
+                        f"two, as the facts write them: {', '.join(p.name for p in facts.projects)}")
+    m = _SKILLS_LINE.search(message)
+    if not m:
+        return failures + [f"no skills line ('Day to day I work in ...' with {MIN_SKILLS}-{MAX_SKILLS} skills from "
+                           f"the facts)"]
+    items = [x.strip() for x in re.split(r",\s*(?:and\s+)?|\s+and\s+", m.group(1)) if x.strip()]
+    known = {s.lower() for s in facts.skills}
+    unknown = [x for x in items if _canonical(x) not in known]
+    if unknown:
+        failures.append(f"skills line names {', '.join(repr(x) for x in unknown)}, not in the facts' skills list")
+    if not MIN_SKILLS <= len(items) <= MAX_SKILLS:
+        failures.append(f"skills line lists {len(items)} skills (must be {MIN_SKILLS}-{MAX_SKILLS})")
+    return failures
+
+
+def check_written(subject: str, body: str, inputs: DraftInputs, facts: Facts, min_words: int = 160,
+                  max_words: int = 200, terms: list[str] | None = None) -> list[str]:
     return validate(subject, body, inputs, facts, resume_action(inputs)[0], min_words, max_words, terms)
 
 
@@ -677,7 +926,7 @@ WRITTEN_FORMAT = """Subject: <one line>
 Body:
 Hi <FirstName>,            (or: Hi <Company> team, / Hi, - as the packet says)
 
-<120-160 words>
+<160-200 words>
 
 Best regards,
 <the signature exactly as given>"""
@@ -717,7 +966,7 @@ def gmail_url(to: str, subject: str, body: str) -> str:
 # Packets
 # ---------------------------------------------------------------------------
 
-STYLE_GUIDE = """# Drafting style guide (ApplyFlow Phase 2b)
+STYLE_GUIDE = """# Drafting style guide (ApplyFlow Phase 2d format)
 
 Write one email per packet, to `output/drafts/written/<id>.md`, then run
 `python -m applyflow import-drafts`. Drafts that fail a check stay on the template, with the reason.
@@ -730,31 +979,38 @@ no flattery filler ("huge fan", "amazing", "dream company"), no "I hope this ema
 post, page or an unambiguous handle), "Hi," for a person's address whose name isn't known, and
 "Hi <Company> team," only for a shared inbox (founders@, careers@, hello@, info@ ...).
 
-**Length.** 120-160 words between the greeting and the sign-off (the signature doesn't count).
+**Length.** 160-200 words between the greeting and the sign-off (the signature doesn't count).
 
-**Role email** (the packet has an opening):
-1. Name the role in the first two sentences.
-2. One specific line about the company or product, taken from the packet's company context.
-3. The packet's best-matching project with one concrete detail (a number, the stack, what it does).
-4. Availability (internship from January 2027 and/or full-time from mid-2027).
-5. A low-pressure ask to be considered.
+**Structure** (both email types):
+1. Opening: who I am and one specific line about the company (role email: name the role in the first
+   two sentences). General outreach may add one line on what I could contribute.
+2. Two projects: the two from the facts that best match the company (the packet suggests them, by role
+   family, the posting's stack or the company's context). One sentence each, with one or two concrete
+   details (stack, scale, numbers). Use the project names exactly as the facts write them, and name no
+   third project.
+3. The credentials line, right after the projects: one short sentence with the DRDO internship and the
+   published patent, e.g. "Before this, I interned at DRDO's DEAL lab and co-invented a published patent
+   on Android attention management." Vary the wording from email to email.
+4. One skills line: "Day to day I work in A, B, C and D." - 4-7 skills, only from the facts' skills list,
+   picked for the company's likely stack (the packet suggests a set).
+5. Availability (internship from January 2027 and/or full-time from mid-2027).
+6. The ask. Role email: a low-pressure ask to be considered. General outreach: point back at the two roles
+   the availability sentence just named - don't restate them - and offer a short chat, e.g. "Would either
+   of these fit <Company>'s plans? If the timing doesn't work, I'd still welcome a short conversation."
+   Vary the wording from email to email. Repeating "January 2027 intern" / "2027 new grad" after the
+   availability sentence fails validation.
 
-**General outreach** (no opening):
-1. What specifically stood out about the company - from its one-liner, site text or description.
-   Say what they do; don't claim you use their product.
-2. What I could contribute (backend / API / serverless work), tied to one project and one detail.
-3. Ask whether they're open to a January 2027 intern or a 2027 new grad, or a short chat.
+**Resume: attached or linked, never both.** Follow the packet's `resume_action`:
+- `link` -> say "My resume is linked below." (never "attached"); the signature keeps the Resume: link.
+- `attach` -> say "I've attached my resume." and remove the Drive link everywhere: no link in the body
+  and no Resume: line in the signature (you attach the PDF in Gmail). The packet's signature already
+  leaves it out.
 
-**Both.**
-- A credentials line right after the project paragraph: one short sentence with the DRDO internship and
-  the published patent, e.g. "Before this, I interned at DRDO's DEAL lab and co-invented a published
-  patent on Android attention management." Vary the wording from email to email.
+**Also.**
 - Write the company line in your own words: an observation about the product, not a close paraphrase
-  of their site's copy.
+  of their site's copy. Say what they do; don't claim you use their product.
 - Don't repeat a phrase between the opening and the closing (e.g. asking to be "considered" in both).
 - Remote / multi-country targets (the packet says so) get one line about working across time zones.
-- The resume line follows the packet's `resume_action`: `link` -> "My resume is linked below."
-  (never "attached"); `attach` -> "I've attached my resume." (you attach the PDF in Gmail).
 - Use only the candidate facts in the packet. Every number and named technology you write must be in
   those facts; a technology from the company's own text is fine only in a sentence about them
   ("your stack uses Go"), never as a skill claim.
@@ -768,6 +1024,19 @@ post, page or an unambiguous handle), "Hi," for a person's address whose name is
 - End with the sign-off and the signature exactly as the packet gives them.
 - No brackets or placeholders left in the text.
 """
+
+
+def _middle_rules(draft: Draft) -> list[str]:
+    return [f"- Two projects (suggested, best first): {draft.project or '-'}",
+            f"  why: {draft.project_reason or '-'}",
+            f"- Skills line (suggested, only facts skills): {', '.join(draft.skills) or '-'}",
+            f"  why: {draft.skills_reason or '-'}",
+            "- Credentials line (DRDO internship + patent) right after the projects"]
+
+
+def _legacy_rules(draft: Draft) -> list[str]:
+    return [f"- Held to the {LEGACY_WORDS[0]}-{LEGACY_WORDS[1]}-word format it was queued under (one project)",
+            f"- Best-matching project: {draft.project or '-'} ({draft.project_reason})"]
 
 
 def render_packet(inputs: DraftInputs, draft: Draft, facts: Facts, meta: dict[str, Any]) -> str:
@@ -817,15 +1086,17 @@ def render_packet(inputs: DraftInputs, draft: Draft, facts: Facts, meta: dict[st
                   "  State the round and month exactly as above."]
     else:
         lines += ["", "## Funding signal", "", "- None sourced: don't mention funding."]
+    lo, hi = word_range(inputs, meta.get("min_words", 160), meta.get("max_words", 200))
+    signature = facts.signature(resume=inputs.legacy or draft.resume_action == "link")
     lines += ["", "## Rules for this draft", "",
               f"- Greeting exactly: `{inputs.greeting}`",
               f"- resume_action: **{draft.resume_action}** ({draft.resume_reason})",
               f"- Subject: " + (f"general inbox - must read as an application, e.g. `{application_subject(inputs, facts)}`"
                                 if inputs.routable_inbox else "conversational (role + who I am, or the intern question)"),
               f"- Time-zone line: {'required (remote / multi-country)' if inputs.remote_global else 'not needed'}",
-              f"- Best-matching project: {draft.project or '-'} ({draft.project_reason})",
-              f"- {meta.get('min_words', 120)}-{meta.get('max_words', 160)} words between the greeting and the sign-off",
-              "- End with exactly:", "", "```", SIGN_OFF, *facts.signature(), "```", "",
+              *(_legacy_rules(draft) if inputs.legacy else _middle_rules(draft)),
+              f"- {lo}-{hi} words between the greeting and the sign-off",
+              "- End with exactly:", "", "```", SIGN_OFF, *signature, "```", "",
               "## Candidate facts (the only facts you may use)", ""]
     lines += [f"- {ln}" for ln in facts.listing()]
     lines += ["", "## Style guide", "", STYLE_GUIDE.split("\n", 2)[2].strip(), "",

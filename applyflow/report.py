@@ -196,6 +196,7 @@ def write_outbox_csv(items, batch_ids: set[str], path: Path) -> Path:
 
 
 _STATUS_LABELS = {"ready": "ready", "sent": "sent", "exhausted": "all addresses bounced",
+                  "stopped": "bounced (on hold)",
                   "do_not_contact": "do not contact", "no_contact": "no contact found",
                   "apply_only": "apply via posting", "no_domain": "no domain", "dropped": "dropped (2c.1)"}
 

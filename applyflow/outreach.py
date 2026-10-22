@@ -2,7 +2,8 @@
 
 ApplyFlow never sends anything. `queue` picks a day's batch; you send each email yourself
 (the report's Open-in-Gmail button) and record it with `mark-sent`. `mark-bounced` moves a
-target on to its next address: a guessed address's alternates first, then the backup contacts.
+target on to its next address: a guessed address's alternates first, then the backup contacts
+(`--stop` records the bounce and puts the rest of the target's addresses on hold instead).
 
 Send tiers, by how likely the address is to arrive:
   1 = a verified address, or a recruiter / HR contact (a published hiring inbox)
@@ -21,8 +22,9 @@ from pathlib import Path
 from typing import Callable
 
 from applyflow.config import Profile
-from applyflow.contacts import (FREEMAIL, DoNotContact, classify_address, inbox_preference, manual_result,
-                                manual_target, name_from_local, needs_manual_check, role_group, search_links)
+from applyflow.contacts import (FOUNDER_INBOXES, FREEMAIL, HIRING_INBOXES, DoNotContact, _local_base,
+                                classify_address, inbox_preference, manual_result, manual_target, name_from_local,
+                                needs_manual_check, role_group, search_links, shared_inbox)
 from applyflow.detect import normalize_website
 from applyflow.discovery import name_key, site_domain
 from applyflow.drafting import (HR_GROUPS, Draft, DraftInputs, Facts, check_written, display_company, gmail_url,
@@ -33,9 +35,10 @@ from applyflow.text import page_summary
 
 Log = Callable[[str], None]
 
-STATUS_ORDER = {"ready": 0, "sent": 1, "exhausted": 2, "do_not_contact": 3, "no_contact": 4, "apply_only": 5,
+STATUS_ORDER = {"ready": 0, "sent": 1, "exhausted": 2, "stopped": 2, "do_not_contact": 3, "no_contact": 4, "apply_only": 5,
                 "no_domain": 6, "dropped": 7}
 STATUS_LABELS = {"ready": "ready to send", "sent": "sent", "exhausted": "every address bounced",
+                 "stopped": "bounced; its other addresses are on hold",
                  "do_not_contact": "on the do-not-contact list", "no_contact": "no contact found",
                  "apply_only": "apply via the posting", "no_domain": "no website domain",
                  "dropped": "dropped from the pool (2c.1 rules)"}
@@ -142,6 +145,23 @@ class OutreachItem:
         return inbox_preference(self.address.email) if self.address else 9
 
     @property
+    def bounce_rank(self) -> int:
+        """Tiers 1-2, lowest bounce risk first (2d): 0 a verified named person (stored name or a first.last address), 1 a hiring inbox (careers@, jobs@,
+        talent@, hr@, work@ ...), 2 founders@, 3 hello@ / hi@ / team@, 4 any other address, 5 info@ / contact@."""
+        a = self.address
+        if a is None:
+            return 9
+        base = _local_base(a.email)
+        named = a.name or name_from_local(a.email)          # a first.last address names its owner
+        if a.confidence == "verified" and named and not shared_inbox(a.email):
+            return 0
+        if base in HIRING_INBOXES:
+            return 1
+        if base in FOUNDER_INBOXES:
+            return 2
+        return {"hello": 3, "hi": 3, "team": 3, "info": 5, "contact": 5}.get(base, 4)
+
+    @property
     def gmail(self) -> str:
         to = self.sent_email or (self.address.email if self.address else "")
         return gmail_url(to, self.draft.subject, self.draft.body) if to else ""
@@ -215,7 +235,7 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         ctx = store.get_context(key)
         kind = check["kind"]
         inputs = DraftInputs(target_id=tid, company_key=key, company=display_company(check["company"]), kind=kind,
-                             team_size=check["team_size"], rules=locked.get(tid, "2c"))
+                             team_size=check["team_size"], rules=locked.get(tid, "2d"))
         prow = pool_keys.get(key) or pool_domains.get(check["domain"] or "")
         if prow is not None and not disc:          # Phase 2c pool company (portfolio, funding, list)
             pdata = json.loads(prow["data"])
@@ -256,6 +276,7 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         evs = events.get(tid, [])
         bounced = [e["email"] for e in evs if e["event"] == "bounced"]
         sent = [e for e in evs if e["event"] == "sent" and e["email"] not in bounced]
+        stopped = [e for e in evs if e["event"] == "stopped"]
         remaining = [a for a in seq if a.email not in bounced]
         item = OutreachItem(target_id=tid, company_key=key, company=inputs.company, kind=kind, status="ready",
                             inputs=inputs, draft=None, bounced=bounced, best_score=check["best_score"],
@@ -276,6 +297,8 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         if sent:
             item.status, item.sent_email, item.sent_date = "sent", sent[-1]["email"], sent[-1]["event_date"]
             item.address = next((a for a in seq if a.email == item.sent_email), Address(email=item.sent_email))
+        elif stopped:
+            item.status, item.status_note = "stopped", f"bounced {stopped[-1]['event_date']}; not moved on to "                                                        f"its alternates or backups"
         elif hold:
             item.status, item.status_note = hold.split(":", 1)
         elif not seq:
@@ -298,9 +321,12 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         items.append(item)
 
     def priority(it: OutreachItem) -> tuple:
-        """Within a send tier: role targets first, then hiring likelihood, then inbox preference (2c)."""
+        """Tiers 1-2 together, lowest bounce risk first (bounce_rank, 2d); tier 3 after them. Then role targets,
+        hiring likelihood and inbox preference (2c)."""
         size = it.team_size
-        return (STATUS_ORDER.get(it.status, 9), it.send_tier or 9, KIND_ORDER.get(it.kind, 3),
+        low_risk = it.send_tier in (1, 2)
+        return (STATUS_ORDER.get(it.status, 9), 0 if low_risk else it.send_tier or 9,
+                it.bounce_rank if low_risk else 0, KIND_ORDER.get(it.kind, 3),
                 -(it.hl_score if it.hl_score is not None else -1), it.inbox_pref, -(it.best_score or 0),
                 0 if size is not None and lo <= size <= hi else 1, size if size is not None else 10**6,
                 it.company.lower())
@@ -321,7 +347,8 @@ def _draft(inputs: DraftInputs, facts: Facts, written, cfg: dict, terms: list[st
         return draft
     return Draft(target_id=inputs.target_id, subject=written["subject"], body=written["body"],
                  resume_action=draft.resume_action, resume_reason=draft.resume_reason, source="claude",
-                 project=draft.project, project_reason=draft.project_reason)
+                 project=draft.project, project_reason=draft.project_reason, skills=draft.skills,
+                 skills_reason=draft.skills_reason)
 
 
 def _why(check, inputs: DraftInputs, kind: str) -> str:
@@ -628,12 +655,16 @@ def mark_batch_sent(store, profile: Profile, batch_day: date, dnc: DoNotContact 
     return marked
 
 
-def mark_bounced(store, profile: Profile, tid: str, day: date, dnc: DoNotContact | None = None) -> OutreachItem:
-    """Record a bounce of the last address sent to; returns the target with its next address."""
+def mark_bounced(store, profile: Profile, tid: str, day: date, dnc: DoNotContact | None = None,
+                 stop: bool = False) -> OutreachItem:
+    """Record a bounce of the last address sent to; returns the target with its next address. With `stop`, the
+    target isn't moved on: its alternates and backups are put on hold (status 'stopped', never queued)."""
     it = _find(build_items(store, profile, dnc), tid)
     if it.status != "sent":
         raise OutreachError(f"{it.target_id} has no sent email to bounce (status: {STATUS_LABELS.get(it.status, it.status)})")
     store.add_event(it.target_id, it.company_key, it.sent_email, "bounced", day.isoformat())
+    if stop:
+        store.add_event(it.target_id, it.company_key, it.sent_email, "stopped", day.isoformat())
     items = refresh_drafts(store, profile, dnc)
     return next(i for i in items if i.target_id == it.target_id)
 

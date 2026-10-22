@@ -29,6 +29,8 @@ decision-maker. Big companies are kept but mostly filter out (senior roles).
      `tests/test_drafting.py`. An LLM is allowed for research/drafting, never for sending decisions.
    - **2c outreach pool at scale - done (2026-10-20)**, see "Phase 2c notes" and `tests/test_pool_2c.py`.
    - **2c.1 quality cleanup - done (2026-10-20)**, see "Phase 2c.1 notes" and `tests/test_pool_2c1.py`.
+   - **2d email format + bounce-safe batches - done (2026-10-22)**, see "Phase 2d notes" and
+     `tests/test_format_2d.py`.
 3. Sending & follow-ups: Gmail API (OAuth) from the user's **personal Gmail**.
    Ramp from ~10-15/day to 30-40/day max. Randomized gaps, business hours in the
    recipient's timezone, no open-tracking pixels, resume linked (attached only for recruiters/HR or
@@ -76,7 +78,7 @@ python -m applyflow explain-contact "..."  # every contact candidate and why the
 python -m applyflow draft-pack    # homepage context, template drafts, packets (output/drafts/packets)
 python -m applyflow import-drafts # load output/drafts/written/<id>.md, validated
 python -m applyflow queue --date YYYY-MM-DD   # the day's batch (stored); report shows it
-python -m applyflow mark-sent <id> | --batch YYYY-MM-DD ; mark-bounced <id>
+python -m applyflow mark-sent <id> | --batch YYYY-MM-DD ; mark-bounced <id> [--stop]
 python -m applyflow add-target "Co" --website co.com [--note] [--email] [--name] [--role]
 python -m applyflow pool [--rescore]   # 2c: every source -> deduped pool, hiring-likelihood score, top ~400
 python -m applyflow pool --reselect    # 2c.1: re-apply large-company / tech-fit rules offline, refill dropped slots
@@ -295,6 +297,43 @@ Open points:
    consumer fintech apps are borderline. Override by hand with `never_cold_email` or by editing the lists.
 3. Tier 1 shrank from 50 to 33 (most dropped preview companies were careers@ inboxes); T1-2 supply is ~129, about
    6-7 days at 20/day before tier 3 must be open.
+
+## Phase 2d notes (email format and bounce-safe batches, 2026-10-22)
+
+- **Middle section** of every email: the two projects that best match the company (`choose_projects`: posting
+  stack + lead project for roles, else project keywords in the company's text; focus word breaks ties), one
+  sentence each (`projects[].short` in the facts), the credentials line, then "Day to day I work in ..." with 4-7
+  facts skills (`choose_skills`: posting, company text, the team's usual stack, the lead project's stack; no
+  React / JavaScript unless full-stack or named by the company). 160-200 words.
+- **Closing ask** (general outreach): the availability sentence names both roles, so the ask only points back at
+  them ("Would either of these fit <Company>'s plans? ..."); `CLOSING_ASKS` rotate by target id. A draft whose ask
+  repeats "January 2027 intern" / "2027 new grad" after the availability sentence fails (`restated_roles`).
+- **Resume, never both**: attach -> "I've attached my resume." and no Resume: line in the signature
+  (`Facts.signature(resume=False)`); link -> the link stays and the body never says "attached".
+- **Validation** (2d only): exactly two named projects, a skills line of facts skills only, credentials line,
+  no restated roles in the ask, no resume link when attaching. `tests/test_format_2d.py`.
+- **Legacy rules**: targets queued or sent when 2d arrived are locked to "2c" in `draft_rules` (once, by a store
+  migration; 2026-10-21's 2b locks stay); they keep the one-project, 120-160-word format and their drafts.
+- **Bounces**: `mark-bounced <id> --stop` records the bounce plus a `stopped` event: the target gets status
+  "stopped" and its alternates / backups are never queued. Used for IOMETE (careers@) and Per Diem (jobs@).
+- **Queue order** (`OutreachItem.bounce_rank`): tiers 1 and 2 together, lowest bounce risk first - a verified
+  named person (stored name or a first.last address) 0, hiring inbox (careers@ / jobs@ / talent@ / hr@ / work@
+  ...) 1, founders@ 2, hello@ / hi@ / team@ 3, any other address 4, info@ / contact@ 5; then role targets, hiring
+  likelihood, inbox preference. Tier 3 still comes after, behind its gate. `daily_batch` is 30.
+- **Drafts**: `output/drafts/drafts_2d.py` rewrote all 159 unsent written drafts of sendable targets (each
+  company's reviewed opening kept; the two projects picked per company in `PAIRS`, overriding the default order
+  where another fits better, e.g. Peoplebox leads with CareerForge AI); all pass. The old files are in
+  `output/drafts/written_pre2d/`. Dropped / apply-only targets were skipped.
+- Live 2026-10-22: 30 sent, 4 bounced (13%) -> tier 3 paused (and it can't unlock anyway: bounces were recorded
+  before it started). 2026-10-23 batch: 30 (2 verified people, 7 careers@, 5 founders@, 16 hello@ / team@).
+  Ready drafts: 159 Claude-written + 119 templates, 0 failing.
+
+Open points:
+1. **Tier 3 can never open under the current gate** (bounces before unlock keep it locked; 4/30 is far above
+   5%). The 169-177 guessed founders need a decision: a different gate, or verifying addresses another way.
+2. **Hiring inboxes bounce too**: both 2026-10-22 bounces were careers@ / jobs@ (published on the site, MX ok).
+   The bounce_rank order assumes hiring inboxes are safer than founders@ - revisit with more send data.
+3. 119 ready targets (e.g. Maya Labs, MixRank in the 2026-10-23 batch) still go out on the template.
 
 ## Calibration backlog
 

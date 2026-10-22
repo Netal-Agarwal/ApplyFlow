@@ -103,15 +103,17 @@ class RoleDraftTests(unittest.TestCase):
         text = body_of(d)
         self.assertIn("Backend Engineer Intern role at Nimbus Labs", text)
         self.assertIn("(Observability for serverless apps)", text)        # one specific line about the company
-        self.assertIn("CareerForge AI, a full-stack web app with 12 REST endpoints", text)
+        self.assertIn("CareerForge AI, a full-stack web app on FastAPI and PostgreSQL with 12 REST endpoints", text)
+        self.assertIn("I also built Serverless FileFinder, a serverless file service", text)     # second project
+        self.assertIn("Day to day I work in Python, FastAPI, PostgreSQL, REST APIs", text)       # posting first
         self.assertIn("a 6-month internship from January 2027", text)
         self.assertIn("My resume is linked below.", text)
         self.assertIn("I'd be happy to talk", text)
         self.assertIn("Before this, I interned at Example Research Lab.", text)
         self.assertNotIn("time zones", text)                              # preferred-city role
-        self.assertTrue(120 <= word_count(text) <= 160)
+        self.assertTrue(160 <= word_count(text) <= 200)
         self.assertEqual(d.subject, "Backend Engineer Intern - B.Tech CS, Example University (2027)")
-        self.assertEqual((d.project, d.resume_action), ("CareerForge AI", "link"))
+        self.assertEqual((d.project, d.resume_action), ("CareerForge AI + Serverless FileFinder", "link"))
 
     def test_signature_from_the_profile(self):
         sig = split_body(self.it.draft.body)[2]
@@ -137,9 +139,9 @@ class GeneralDraftTests(unittest.TestCase):
         self.assertTrue(d.body.startswith("Hi Ravi,\n"))
         text = body_of(d)
         self.assertIn("Orbit Pay (Payments infrastructure for Indian SMBs) caught my attention", text)
-        self.assertIn("open to a January 2027 intern or a 2027 new grad", text)
-        self.assertIn("short chat", text)
-        self.assertEqual(d.project, "Serverless FileFinder")           # 'payments' / 'infrastructure' keywords
+        self.assertIn("Is either of these something Orbit Pay might have room for?", text)   # 2d: no restated roles
+        self.assertIn("short conversation", text)
+        self.assertEqual(d.project, "Serverless FileFinder + CareerForge AI")   # 'payments' / 'infrastructure' first
         self.assertIn("Serverless FileFinder", text)
         self.assertEqual(d.template_failures, [])
         self.assertEqual(d.subject, "January 2027 intern or 2027 new grad at Orbit Pay?")   # ", Inc." dropped
@@ -166,6 +168,7 @@ class GeneralDraftTests(unittest.TestCase):
 
     def test_long_inputs_still_fit_the_word_range(self):
         long_facts = load_facts(PROFILE)
+        long_facts.projects[2].short = ""
         long_facts.projects[2].detail += (", with retries, dead-letter queues, structured logs and alarms on every route, "
                                           "plus upload checks, search filters, access rules and a cleanup job that "
                                           "removes stale files every night without anyone touching it")
@@ -173,7 +176,8 @@ class GeneralDraftTests(unittest.TestCase):
                                        kind="general_outreach", one_liner="Payments infrastructure for Indian SMBs",
                                        remote_global=True), long_facts, terms=TERMS)
         self.assertEqual(d.template_failures, [])
-        self.assertIn("Serverless FileFinder (AWS Lambda, S3, DynamoDB).", d.body)
+        self.assertTrue(160 <= word_count(body_of(d)) <= 200)
+        self.assertIn("Serverless FileFinder", body_of(d))
 
     def test_display_company(self):
         self.assertEqual(display_company("Wifi Dabba, Inc."), "Wifi Dabba")
@@ -191,17 +195,17 @@ class ValidationTests(unittest.TestCase):
 
     def check(self, subject=None, body=None, inputs=None, action="link"):
         return validate(self.subject if subject is None else subject, self.body if body is None else body,
-                        inputs or self.inputs, FACTS, action, 120, 160, TERMS)
+                        inputs or self.inputs, FACTS, action, 160, 200, TERMS)
 
     def test_good_fixture_passes(self):
         self.assertEqual(self.check(), [])
 
     def test_word_count(self):
         subject, body = parse_written((D / "written_nimbus_short.md").read_text(encoding="utf-8"))
-        self.assertTrue(any("words between greeting and sign-off (must be 120-160)" in f
+        self.assertTrue(any("words between greeting and sign-off (must be 160-200)" in f
                             for f in self.check(subject, body)))
         long_body = self.body.replace("about either project.", "about either project. " + "More detail here. " * 20)
-        self.assertTrue(any("must be 120-160" in f for f in self.check(body=long_body)))
+        self.assertTrue(any("must be 160-200" in f for f in self.check(body=long_body)))
 
     def test_greeting_must_match_the_contact(self):
         failures = self.check(body=self.body.replace("Hi Priya,", "Hi Rahul,"))
@@ -230,7 +234,11 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("says the resume is attached, but resume_action is link", self.check(body=attached))
         self.assertIn("resume_action is attach, but the body doesn't say the resume is attached",
                       self.check(action="attach"))
-        self.assertEqual(self.check(body=attached, action="attach"), [])
+        # 2d: attached or linked, never both - an attached resume drops the signature's Resume: link.
+        self.assertIn("resume_action is attach, but the resume link is still in the email: remove it from the body "
+                      "and the signature (attached or linked, never both)", self.check(body=attached, action="attach"))
+        no_link = attached.replace("\nResume: https://example.com/your-resume.pdf", "")
+        self.assertEqual(self.check(body=no_link, action="attach"), [])
 
     def test_numbers_must_come_from_the_facts(self):
         body = self.body.replace("12 REST endpoints", "25 REST endpoints")
@@ -261,7 +269,7 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("no credentials line (mention the internship)", self.check(body=body))
         facts = load_facts(PROFILE)
         facts.patent.update(title="CSES", short="Android attention management")
-        failures = validate(self.subject, self.body, self.inputs, facts, "link", 120, 160, TERMS)
+        failures = validate(self.subject, self.body, self.inputs, facts, "link", 160, 200, TERMS)
         self.assertIn("no credentials line (mention the patent)", failures)
 
     def test_role_must_be_named(self):
@@ -494,7 +502,7 @@ class ImportTests(unittest.TestCase):
         self.assertFalse(results[0].ok)
         it = items_by_id(self.store)["yc-nimbus"]
         self.assertEqual(it.draft.source, "template")
-        self.assertTrue(any("must be 120-160" in f for f in it.draft.failures))
+        self.assertTrue(any("must be 160-200" in f for f in it.draft.failures))
 
     def test_unknown_id_and_bad_format(self):
         (self.tmp / "yc-nobody.md").write_text("Subject: x\n\nBody:\nHi,\n", encoding="utf-8")

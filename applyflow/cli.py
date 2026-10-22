@@ -16,7 +16,7 @@
     python -m applyflow import-drafts    # load output/drafts/written/<id>.md (validated)
     python -m applyflow queue --date D   # pick a day's batch (tier 1, 2, then gated tier 3)
     python -m applyflow mark-sent <id>   # record a sent email (or --batch D for a whole day)
-    python -m applyflow mark-bounced <id>   # record a bounce; the next address is suggested
+    python -m applyflow mark-bounced <id> [--stop]   # record a bounce; the next address is suggested (or none)
     python -m applyflow add-target "Co" --website co.com   # a target of your own
     python -m applyflow pool             # Phase 2c: every source -> scored pool, top ~400 selected
     python -m applyflow pool --reselect  # 2c.1: apply large-company / tech-fit rules offline, refill
@@ -388,12 +388,14 @@ def cmd_mark_sent(args, profile, store) -> int:
 def cmd_mark_bounced(args, profile, store) -> int:
     from applyflow.outreach import OutreachError, mark_bounced, parse_day
     try:
-        it = mark_bounced(store, profile, args.target, parse_day(args.date), _dnc())
+        it = mark_bounced(store, profile, args.target, parse_day(args.date), _dnc(), stop=args.stop)
     except OutreachError as exc:
         print(f"error: {exc}")
         return 1
     print(f"Bounce recorded for {it.target_id} ({it.bounced[-1]}).")
-    if it.address:
+    if it.status == "stopped":
+        print("Its alternates and backups are on hold (--stop): it won't be queued again.")
+    elif it.address:
         print(f"Next address: {it.address.label()} - send tier {it.send_tier}. "
               f"The draft greets '{it.inputs.greeting}'" + (" (template: the written draft no longer fits)"
                                                             if it.draft.failures else "") + ".")
@@ -619,6 +621,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("mark-bounced", help="record a bounce; the next address is suggested")
     p.add_argument("target")
     p.add_argument("--date", help="YYYY-MM-DD (default today)")
+    p.add_argument("--stop", action="store_true", help="don't move on to the target's alternates or backups")
     p.set_defaults(func=cmd_mark_bounced)
 
     p = sub.add_parser("add-target", help="add a company of your own as an outreach target")

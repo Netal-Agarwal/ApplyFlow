@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS outreach_events (   -- sent / bounced history (never 
     target_id   TEXT NOT NULL,
     company_key TEXT,
     email       TEXT NOT NULL,
-    event       TEXT NOT NULL,                 -- sent | bounced
+    event       TEXT NOT NULL,                 -- sent | bounced | stopped (bounced, no further addresses)
     send_tier   INTEGER,                       -- the address's tier when sent (tier-3 gate)
     event_date  TEXT NOT NULL,                 -- YYYY-MM-DD
     batch_date  TEXT,
@@ -218,7 +218,7 @@ CREATE TABLE IF NOT EXISTS funding_lookups (   -- startup name -> website from i
 
 CREATE TABLE IF NOT EXISTS draft_rules (       -- drafts held to an older rule set (already scheduled)
     target_id   TEXT PRIMARY KEY,
-    rules       TEXT NOT NULL,                 -- "2b": greeting / subject rules from before Phase 2c
+    rules       TEXT NOT NULL,                 -- "2b": rules from before Phase 2c; "2c": before the 2d format
     reason      TEXT,
     locked_at   TEXT NOT NULL
 );
@@ -259,6 +259,14 @@ class Store:
                 self.conn.execute("INSERT OR IGNORE INTO draft_rules (target_id, rules, reason, locked_at) "
                                   "VALUES (?, '2b', ?, ?)", (row[0], f"queued for {row[1]} before Phase 2c", now))
             self.conn.execute("CREATE TABLE IF NOT EXISTS draft_rules_done (at TEXT)")
+        # Phase 2d: targets already queued or sent when the two-project format arrived keep the 2c rules, once.
+        if not self.conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'draft_rules_2d_done'").fetchone():
+            now = _now()
+            for row in self.conn.execute("SELECT target_id, 'queued' FROM send_queue UNION "
+                                         "SELECT target_id, event FROM outreach_events").fetchall():
+                self.conn.execute("INSERT OR IGNORE INTO draft_rules (target_id, rules, reason, locked_at) "
+                                  "VALUES (?, '2c', ?, ?)", (row[0], f"{row[1]} before the 2d format", now))
+            self.conn.execute("CREATE TABLE IF NOT EXISTS draft_rules_2d_done (at TEXT)")
         for table, column, decl in (("jobs", "team_size", "INTEGER"), ("scores", "contact_hint", "TEXT"),
                                      ("scores", "merged_locations", "TEXT"), ("companies", "detected_from", "TEXT"),
                                      ("companies", "status_reason", "TEXT"), ("contacts", "alternates", "TEXT"),

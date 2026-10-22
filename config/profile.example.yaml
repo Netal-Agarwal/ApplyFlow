@@ -47,18 +47,22 @@ candidate:
       published: ""
       short: ""             # e.g. "Android attention management"
       detail: ""
-    projects:               # lead_project names in role_families refer to these
+    projects:               # lead_project names in role_families refer to these; `short` = the one-sentence
+                            # detail used when two projects share the middle of an email (2d format)
       - name: "CareerForge AI"
         stack: "React, FastAPI, PostgreSQL"
         detail: "a full-stack web app with 12 REST endpoints and 40+ automated API tests"
+        short: "a full-stack web app on FastAPI and PostgreSQL with 12 REST endpoints and 40+ automated API tests"
         keywords: [backend, api, python, product, platform]
       - name: "Judicial AI System"
         stack: "Python, Flask, Neo4j"
         detail: "an NLP pipeline over 1,000+ documents with a Neo4j graph of the extracted entities"
+        short: "an NLP pipeline over 1,000+ documents with a Neo4j graph of the extracted entities"
         keywords: [ai, nlp, llm, ml, data, graph, agent]
       - name: "Serverless FileFinder"
         stack: "AWS Lambda, S3, DynamoDB"
         detail: "a serverless file service on 6 AWS Lambda functions with DynamoDB metadata search"
+        short: "a serverless file service on 6 AWS Lambda functions with DynamoDB metadata search"
         keywords: [cloud, aws, serverless, infrastructure, payments, fintech]
 
 # ---------------------------------------------------------------------------
@@ -299,15 +303,15 @@ never_cold_email: ["Darwinbox"]
 # you send from Gmail and record it with `mark-sent`.
 # ---------------------------------------------------------------------------
 outreach:
-  daily_batch: 20          # emails picked by `queue` per day
+  daily_batch: 30          # emails picked by `queue` per day
   tier3:                   # guessed addresses (send tier 3), inside the same daily_batch total
     unlock_after_days: 2   # calendar days after the first mark-sent, and only if nothing has bounced
     start_per_day: 5       # tier-3 emails per day once unlocked
     ramp_after_days: 3     # days after the first tier-3 send before the higher limit...
     ramp_per_day: 10       # ...if the overall bounce rate stays under max_bounce_rate
     max_bounce_rate: 0.05  # bounces / sends at or above this pauses tier 3
-  min_words: 120           # draft length, counted between the greeting and the sign-off
-  max_words: 160
+  min_words: 160           # draft length, counted between the greeting and the sign-off
+  max_words: 200
 
 # ---------------------------------------------------------------------------
 # Contacts (Phase 2a): who to email at each target company.

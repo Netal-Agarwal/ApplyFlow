@@ -45,7 +45,7 @@ DEFAULT_CONTACTS = {
     "mx_cache_days": 30,
 }
 DEFAULT_OUTREACH = {
-    "daily_batch": 20,                 # emails `queue` picks per day
+    "daily_batch": 30,                 # emails `queue` picks per day
     "tier3": {                         # guessed addresses (send tier 3)
         "unlock_after_days": 2,        # calendar days after the first mark-sent, with zero bounces so far
         "start_per_day": 5,            # tier-3 emails per day once unlocked (inside daily_batch)
@@ -53,8 +53,8 @@ DEFAULT_OUTREACH = {
         "ramp_per_day": 10,            # ... if the bounce rate stays under max_bounce_rate
         "max_bounce_rate": 0.05,       # at or above this (bounces / sends), tier 3 pauses
     },
-    "min_words": 120,                  # draft length between the greeting and the sign-off
-    "max_words": 160,
+    "min_words": 160,                  # draft length between the greeting and the sign-off (2d format)
+    "max_words": 200,
 }
 DEFAULT_DISCOVERY = {
     "recheck_days": 30,

@@ -639,16 +639,17 @@ def pool_company_store():
 
 
 class QueueOrderTests(unittest.TestCase):
-    def test_hiring_likelihood_then_inbox_preference_within_a_tier(self):
+    def test_bounce_risk_then_hiring_likelihood_within_tiers_1_2(self):
+        # 2d: founders@ (lower bounce risk) before hello@, info@ last; hiring likelihood only breaks ties.
         items = build_items(pool_company_store(), PROFILE)
-        self.assertEqual([it.company for it in items], ["HelloCo", "InfoCo", "Low"])
-        self.assertEqual([it.hl_score for it in items], [70, 70, 40])
+        self.assertEqual([it.company for it in items], ["Low", "HelloCo", "InfoCo"])
+        self.assertEqual([it.hl_score for it in items], [40, 70, 70])
 
     def test_earlier_stored_batch_holds_its_targets(self):
         store = pool_company_store()
         make_queue(store, PROFILE, date(2026, 10, 21), size=1)
         later = make_queue(store, PROFILE, date(2026, 10, 22), save=False)
-        self.assertEqual([it.company for it in later.items], ["InfoCo", "Low"])
+        self.assertEqual([it.company for it in later.items], ["HelloCo", "InfoCo"])
         self.assertEqual(later.held_earlier, 1)
 
 
