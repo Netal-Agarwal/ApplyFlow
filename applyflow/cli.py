@@ -22,6 +22,12 @@
     python -m applyflow pool --reselect  # 2c.1: apply large-company / tech-fit rules offline, refill
     python -m applyflow contacts --limit 50   # contacts in resumable batches, with an ETA
     python -m applyflow verify-sources   # every published address must appear on the company's site
+    python -m applyflow hn-archive --from 2026-05 --to 2026-10   # 2e: HN "Who is hiring?" archive -> role targets
+    python -m applyflow yc-jobs          # 2e: YC company job pages -> role targets
+    python -m applyflow import-targets   # 2e: config/private/manual_targets.txt -> manual targets with drafts
+    python -m applyflow role-check       # 2e: a role match (board / careers page) for targets without one
+    python -m applyflow contacts --deep  # 2e: more pages for targets with no safe contact
+    python -m applyflow safe-contacts    # 2e: unsent safe contacts by kind, and sending days covered
 
 ApplyFlow never sends email: you send from Gmail and record it here.
 """
@@ -161,7 +167,12 @@ def cmd_contacts(args, profile, store) -> int:
     days = int(profile.contacts["recheck_days"])
     roles = sum(t.kind == "role" for t in targets)
     from applyflow.contacts import pending_targets
-    batch, pending = pending_targets(store, targets, days, args.force, args.limit, args.retry_unread)
+    if args.deep:
+        batch, pending = deep_targets(store, profile, targets, args.limit)
+        print(f"Deep search (2e): {len(pending)} target(s) with no safe contact (none, info@ / contact@ only, guessed "
+              f"or an unrecognised address); this batch {len(batch)}.")
+    else:
+        batch, pending = pending_targets(store, targets, days, args.force, args.limit, args.retry_unread)
     skipped = len(targets) - len(pending)
     recent = "" if args.force else f"; {skipped} checked in the last {days} days are skipped"
     print(f"Finding contacts for {len(targets)} targets ({roles} with A/B roles, {len(targets) - roles} general "
@@ -177,8 +188,12 @@ def cmd_contacts(args, profile, store) -> int:
         if manual is not None and manual["email"]:
             store.save_contact_result(manual_result(target, manual))     # given by hand: no lookup
             continue
-        result = find_contacts(client, target, profile, dnc, github, log=print, mx=mx)
-        store.save_contact_result(result)
+        result = find_contacts(client, target, profile, dnc, github, log=print, mx=mx, deep=args.deep)
+        if args.deep and any(r.startswith("website (deep): read 0 page(s)") for r in result.reasons) \
+                and store.contacts_for(target.key):
+            print(f"    kept the stored contacts: the site couldn't be read now")
+        else:
+            store.save_contact_result(result)
         done += 1
         elapsed = time.monotonic() - started
         per = elapsed / i
@@ -195,6 +210,24 @@ def cmd_contacts(args, profile, store) -> int:
     return 0
 
 
+def deep_targets(store, profile, targets, limit: int = 0):
+    """2e: targets (not queued / sent / locked) whose current address isn't safe - no contact, only info@ /
+    contact@, a guess or an unrecognised address - in target order; (this batch, all) like pending_targets."""
+    from applyflow.outreach import build_items
+    items = {it.company_key: it for it in build_items(store, profile, _dnc())}
+    deep_done = {r[0] for r in store.conn.execute(
+        "SELECT company_key FROM contact_checks WHERE details LIKE '%website (deep)%'")}
+    pending = []
+    for t in targets:
+        it = items.get(t.key)
+        if it is None or it.protected or t.key in deep_done or not t.domain:
+            continue
+        if it.status in ("no_contact", "unsendable") or (it.status == "ready" and it.address is not None
+                                                          and it.address.kind in ("guessed", "other")):
+            pending.append(t)
+    return (pending[:limit] if limit else pending), pending
+
+
 def _mmss(seconds: float) -> str:
     seconds = int(seconds)
     return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m" if seconds >= 3600 else f"{seconds // 60}m{seconds % 60:02d}s"
@@ -205,6 +238,8 @@ def cmd_pool(args, profile, store) -> int:
     from applyflow.pool import build_pool, rescore, reselect
     from applyflow.report import write_pool_csv
     day = parse_day(args.date)
+    if args.target_size:                      # 2e: a bigger pool for one run, without editing profile.yaml
+        profile.pool["target_size"] = args.target_size
     if args.reselect:
         scored, changes = reselect(store, profile, day)
         dropped = [c for c in changes if c.was_selected]
@@ -238,6 +273,107 @@ def cmd_pool(args, profile, store) -> int:
     for s in scored[:20]:
         print(f"  {s.score:>3}  {s.company.name:<28} {s.company.region:<13} {'; '.join(s.reasons)}")
     print(f"\nWritten: {write_pool_csv(scored, Path(args.out) / 'pool.csv')}")
+    return 0
+
+
+def _month(text: str, end: bool = False):
+    from datetime import date, timedelta
+    y, m = (int(x) for x in text.split("-")[:2])
+    if not end:
+        return date(y, m, 1)
+    return (date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1))
+
+
+def cmd_hn_archive(args, profile, store) -> int:
+    from applyflow.refill import existing_targets, collect_hn_archive
+    client = _client(profile, args.min_interval)
+    start, end = _month(args.start), _month(args.end, end=True)
+    print(f"Reading HN 'Who is hiring?' threads {start} to {end} (HN Algolia API)...")
+    stats = collect_hn_archive(store, client, profile, start, end, existing_targets(store, _dnc()), log=print)
+    score_all(store, profile)
+    print(f"\n{stats['posts']} posts in {len(stats['threads'])} thread(s); kept {stats['kept']} "
+          f"({stats['new']} new companies, {stats['existing']} already targets).")
+    for why, n in sorted(stats["skipped"].items(), key=lambda kv: -kv[1])[:12]:
+        print(f"  skipped {n:>4}  {why}")
+    print("Openings re-scored. Run `contacts --limit 50` for the new role targets, then `draft-pack`.")
+    return 0
+
+
+def cmd_yc_jobs(args, profile, store) -> int:
+    from applyflow.refill import collect_yc_jobs, existing_targets
+    rows = store.conn.execute("SELECT key, name FROM pool_companies WHERE key LIKE 'yc:%' ORDER BY "
+                              "CASE region WHEN 'india' THEN 0 ELSE 1 END, rank").fetchall()
+    slugs = [(r["key"][3:], r["name"]) for r in rows]
+    if args.limit:
+        slugs = slugs[:args.limit]
+    print(f"Reading {len(slugs)} YC company job pages (robots.txt allows /companies/<slug>)...")
+    stats = collect_yc_jobs(store, _client(profile, args.min_interval), profile, slugs, existing_targets(store, _dnc()),
+                            log=print)
+    score_all(store, profile)
+    print(f"\n{stats['companies']} pages read ({stats['failed']} failed); {stats['with_postings']} list postings "
+          f"({stats['postings']} in all); {stats['kept']} fit at {stats['matched_companies']} companies.")
+    for why, n in sorted(stats["skipped"].items(), key=lambda kv: -kv[1])[:10]:
+        print(f"  not kept {n:>4}  {why}")
+    if stats["new_grads_ok"]:
+        print("Roles marked 'new grads OK':")
+        for company, title, salary in stats["new_grads_ok"]:
+            print(f"  {company:<26} {title:<44} {salary}")
+    return 0
+
+
+def cmd_import_targets(args, profile, store) -> int:
+    from applyflow.refill import import_targets
+    from applyflow.outreach import KIND_LABELS
+    path = Path(args.file)
+    results, errors = import_targets(store, profile, _client(profile, args.min_interval), path, _dnc(), log=print,
+                                     out_dir=Path(args.out) / "drafts")
+    for e in errors:
+        print(f"  {e}")
+    for r in results:
+        if r.error:
+            print(f"  line {r.line.line}: {r.line.company}: {r.error}")
+            continue
+        role = r.role.get("title") or ""
+        print(f"  {r.line.company:<26} {r.status:<10} {r.address or '-':<32} {KIND_LABELS.get(r.kind, r.kind):<22} "
+              f"tech fit {r.tech_fit}; role match {r.role.get('match', 'unknown')}" + (f": {role}" if role else ""))
+    if results:
+        print(f"Packets in {Path(args.out) / 'drafts' / 'packets'}; write drafts, then `import-drafts`.")
+    return 0
+
+
+def cmd_role_check(args, profile, store) -> int:
+    from applyflow.outreach import build_items
+    from applyflow.refill import check_roles
+    have = store.role_matches()
+    keys = [it.company_key for it in build_items(store, profile, _dnc())
+            if it.status == "ready" and not it.protected and it.company_key not in have
+            and (it.company_key.startswith(("pool:", "manual:")) or args.all)]
+    if args.limit:
+        keys = keys[:args.limit]
+    print(f"Checking {len(keys)} target(s) for an open role that fits (ATS board, else careers page)...")
+    counts = check_roles(store, _client(profile, args.min_interval), profile, keys, log=print)
+    print("Role matches: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+    return 0
+
+
+def cmd_safe_contacts(args, profile, store) -> int:
+    from applyflow.outreach import KIND_LABELS, build_items, mark_queued
+    from applyflow.refill import safe_summary
+    items = build_items(store, profile, _dnc())
+    mark_queued(store, items)
+    s = safe_summary(items, int(profile.outreach["daily_batch"]), int(profile.outreach["general_inbox_per_day"]),
+                     args.guessed_per_day)
+    print("Ready, unsent targets by contact kind:")
+    for k, n in sorted(s["by_kind"].items(), key=lambda kv: -kv[1]):
+        print(f"  {KIND_LABELS.get(k, k):<28} {n:>4}")
+    print(f"Safe (verified person, founders@, hiring inbox): {s['safe']}; hello@ / hi@ / team@: {s['general']}; "
+          f"guessed: {s['guessed']} ({s['queued']} of all these already in a stored batch).")
+    print(f"At {profile.outreach['daily_batch']}/day with <= {profile.outreach['general_inbox_per_day']} hello@ and "
+          f"<= {args.guessed_per_day} guessed a day: {s['days']} sending day(s).")
+    statuses: dict[str, int] = {}
+    for it in items:
+        statuses[it.status] = statuses.get(it.status, 0) + 1
+    print("All targets by status: " + ", ".join(f"{k}={v}" for k, v in sorted(statuses.items())))
     return 0
 
 
@@ -575,6 +711,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=0, help="look up at most N targets this run (resumable)")
     p.add_argument("--retry-unread", action="store_true",
                    help="also redo lookups that read no page of the site (network drop, failing site)")
+    p.add_argument("--deep", action="store_true",
+                   help="2e: read more pages (team, about-us, careers, jobs, join, contact, privacy, terms, footer "
+                        "links) for targets with no safe contact")
     p.add_argument("--out", default=str(config.OUTPUT_DIR))
     p.set_defaults(func=cmd_contacts)
 
@@ -584,6 +723,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="2c.1: re-score and re-select the stored pool under the current rules (large companies, "
                         "tech-fit floor), refilling dropped slots; queued / sent / locked targets are kept")
     p.add_argument("--date", help="score as of this day (YYYY-MM-DD, default today)")
+    p.add_argument("--target-size", type=int, default=0,
+                   help="2e: targets to select this run (default pool.target_size, 400)")
     p.add_argument("--out", default=str(config.OUTPUT_DIR))
     p.set_defaults(func=cmd_pool)
 
@@ -633,6 +774,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--role", help="the person's role, e.g. CTO")
     p.add_argument("--out", default=str(config.OUTPUT_DIR))
     p.set_defaults(func=cmd_add_target)
+
+    p = sub.add_parser("hn-archive", help="2e: HN 'Who is hiring?' threads -> role targets with posting emails")
+    p.add_argument("--from", dest="start", default="2026-05", help="first month, YYYY-MM (default 2026-05)")
+    p.add_argument("--to", dest="end", default="2026-10", help="last month, YYYY-MM (default 2026-10)")
+    p.set_defaults(func=cmd_hn_archive)
+
+    p = sub.add_parser("yc-jobs", help="2e: YC company job pages -> role targets")
+    p.add_argument("--limit", type=int, default=0, help="read at most N companies' pages")
+    p.set_defaults(func=cmd_yc_jobs)
+
+    p = sub.add_parser("import-targets", help="2e: companies you found yourself (Company | website | role | note)")
+    p.add_argument("file", nargs="?", default=str(config.CONFIG_DIR / "private" / "manual_targets.txt"))
+    p.add_argument("--out", default=str(config.OUTPUT_DIR))
+    p.set_defaults(func=cmd_import_targets)
+
+    p = sub.add_parser("role-check", help="2e: look for an open role that fits at targets without a role match")
+    p.add_argument("--limit", type=int, default=0)
+    p.add_argument("--all", action="store_true", help="every ready target, not only pool / manual ones")
+    p.set_defaults(func=cmd_role_check)
+
+    p = sub.add_parser("safe-contacts", help="2e: unsent safe contacts by kind and the sending days they cover")
+    p.add_argument("--guessed-per-day", type=int, default=7)
+    p.set_defaults(func=cmd_safe_contacts)
 
     p = sub.add_parser("discover", help="find hiring startups and their job boards automatically")
     p.add_argument("--limit", type=int, default=40, help="companies to check this run (default 40)")

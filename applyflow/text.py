@@ -47,19 +47,23 @@ def matching_phrases(text: str, phrases: list[str]) -> list[str]:
     return [p for p in phrases if _phrase_regex(p).search(lowered)]
 
 
-_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+_EMAIL_RE = re.compile(r"(?<![A-Za-z0-9._%+\-])[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9.\-]{1,253}\.[A-Za-z]{2,}")
 # Bracketed "at" ("jobs [at] acme.com", "jobs (at) acme [dot] com") is unambiguous.
 # A bare " at " only counts with a spelled-out " dot " ("jobs at acme dot com"),
 # so ordinary prose like "work with us at Acme. We..." isn't mistaken for an email.
+# Anchored at the start of a token and length-capped (64 / 63, as in RFC 5321): unanchored, these re-scan every
+# position of a long unbroken run of characters (inline data, minified scripts) and take minutes on one page (2e).
+_USER = r"(?<![A-Za-z0-9._%+\-])([A-Za-z0-9._%+\-]{1,64})"
+_LABEL = r"[A-Za-z0-9\-]{1,63}"
 _OBFUSCATED_EMAIL_RES = [
     re.compile(
-        r"([A-Za-z0-9._%+\-]+)\s*(?:\[at\]|\(at\)|\{at\})\s*"
-        r"([A-Za-z0-9\-]+(?:\s*(?:\[dot\]|\(dot\)|\{dot\}|\s+dot\s+|\.)\s*[A-Za-z0-9\-]+)+)",
+        _USER + r"\s*(?:\[at\]|\(at\)|\{at\})\s*"
+        rf"({_LABEL}(?:(?:\s*(?:\[dot\]|\(dot\)|\{{dot\}})\s*|\.|\s+dot\s+){_LABEL}){{1,6}})",
         re.I,
     ),
     re.compile(
-        r"([A-Za-z0-9._%+\-]+)\s+at\s+"
-        r"([A-Za-z0-9\-]+(?:\s*(?:\[dot\]|\(dot\)|\{dot\}|\s+dot\s+)\s*[A-Za-z0-9\-]+)+)",
+        _USER + r"\s+at\s+"
+        rf"({_LABEL}(?:(?:\s*(?:\[dot\]|\(dot\)|\{{dot\}})\s*|\s+dot\s+){_LABEL}){{1,6}})",
         re.I,
     ),
 ]

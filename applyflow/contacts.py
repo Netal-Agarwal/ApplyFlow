@@ -54,6 +54,7 @@ ROLE_FIT = {
 }
 ROLE_FIT["the email in the post"] = ROLE_FIT["founder or CTO"]
 GUESSABLE_GROUPS = {"founder", "cto", "eng_lead"}           # people we generate first@domain for
+MOCKUP_ADDRESSES = 4          # 2e: this many unnamed personal addresses on one page = sample data / a directory
 
 
 # ---------------------------------------------------------------------------
@@ -512,6 +513,36 @@ _LIKELY_PAGE = re.compile(r"about|team|people|leadership|founders?|contact|caree
 _HREF = re.compile(r"""href\s*=\s*["']([^"'#]+)["']""", re.I)
 _MAILTO = re.compile(r"""href\s*=\s*["']mailto:([^"'?]+)""", re.I)
 CONVENTIONAL_PATHS = ["/about", "/team", "/contact", "/careers", "/company"]
+# 2e deeper search: more pages where founders, hiring inboxes and team members are named.
+DEEP_PATHS = ["/team", "/about", "/about-us", "/careers", "/jobs", "/join", "/join-us", "/contact", "/contact-us",
+              "/company", "/privacy", "/privacy-policy", "/terms"]
+_DEEP_PAGE = re.compile(r"about|team|people|leadership|founders?|contact|careers?|jobs|join|company|who-we-are|"
+                        r"our-story|privacy|terms|legal|imprint", re.I)
+_FOOTER = re.compile(r"<footer\b.*?</footer\s*>", re.I | re.S)
+
+
+def deep_pages(html: str, root: str, limit: int) -> list[str]:
+    """2e: same-site links that may name people or inboxes - the usual about / team / careers pages, the
+    footer's links (privacy, terms, contact) - then the DEEP_PATHS the site didn't link."""
+    host = urlparse(root).netloc.lower().removeprefix("www.")
+    footer = " ".join(_FOOTER.findall(html))
+    pages: list[str] = []
+    for source, must_match in ((html, True), (footer, False)):
+        for href in _HREF.findall(source):
+            url = urljoin(root + "/", href.strip()).split("?")[0].rstrip("/")
+            parts = urlparse(url)
+            h = parts.netloc.lower().removeprefix("www.")
+            if parts.scheme not in ("http", "https") or not (h == host or h.endswith("." + host)) or url == root:
+                continue
+            if (must_match and not _DEEP_PAGE.search(parts.path)) or parts.path.count("/") > 2 \
+                    or re.search(r"\.(?:pdf|png|jpe?g|svg|zip)$|/blog/|/posts?/", parts.path, re.I):
+                continue
+            if url not in pages:
+                pages.append(url)
+    for path in DEEP_PATHS:
+        if root + path not in pages:
+            pages.append(root + path)
+    return pages[:limit]
 
 
 def likely_pages(html: str, root: str, limit: int) -> list[str]:
@@ -544,7 +575,8 @@ class SiteFindings:
     careers_page: str = ""                                            # a careers / jobs page that loaded (2c)
 
 
-def read_site(client, website: str, domain: str, max_pages: int) -> SiteFindings:
+def read_site(client, website: str, domain: str, max_pages: int, deep: bool = False) -> SiteFindings:
+    """The homepage plus up to `max_pages` likely pages; `deep` (2e) follows footer links and tries DEEP_PATHS."""
     out = SiteFindings()
     root = normalize_website(website)
     queue = [root]
@@ -565,7 +597,7 @@ def read_site(client, website: str, domain: str, max_pages: int) -> SiteFindings
         if not out.careers_page and re.search(r"careers?|jobs|join-us|work-with-us", urlparse(url).path, re.I):
             out.careers_page = url
         if url == root:
-            queue.extend(likely_pages(page, root, max_pages))
+            queue.extend(deep_pages(page, root, max_pages) if deep else likely_pages(page, root, max_pages))
             out.home = {"website": root, "status": "ok", **page_summary(page)}
         text = html_to_text(page)
         for email in [m.strip().lower() for m in _MAILTO.findall(page)] + extract_emails(text):
@@ -729,7 +761,7 @@ def guess_alternates(first: str, last: str, domain: str) -> list[str]:
 
 
 def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, github: GitHubBudget,
-                  log: Log = lambda _: None, mx: MXChecker | None = None) -> ContactResult:
+                  log: Log = lambda _: None, mx: MXChecker | None = None, deep: bool = False) -> ContactResult:
     result = ContactResult(target=target, status="none")
     fit_table = ROLE_FIT.get(target.hint, ROLE_FIT["founder or CTO"])
     cands: list[Contact] = []
@@ -772,7 +804,7 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
     elif target.domain and not _good_enough(cands):
         # 2. The company's own site.
         site = read_site(client, target.website or f"https://{target.domain}", target.domain,
-                         int(profile.contacts["max_site_pages"]))
+                         int(profile.contacts["deep_site_pages" if deep else "max_site_pages"]), deep=deep)
         result.context = site.home
         result.careers_page = site.careers_page
         for p in site.people:
@@ -799,7 +831,8 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
                         confidence=confidence, source="website", source_url=url, group=group,
                         inbox_rank=inbox_rank,
                         proof="company site" if same_site(site_domain(url), target.domain) else "other page"))
-        note = f"website: read {len(site.read)} page(s), {len(site.emails)} email(s), {len(people)} named people"
+        note = (f"website{' (deep)' if deep else ''}: read {len(site.read)} page(s), {len(site.emails)} email(s), "
+                f"{len(people)} named people")
         if site.blocked:
             note += f"; robots.txt disallowed {', '.join(urlparse(u).path or '/' for u in site.blocked)}"
         result.reasons.append(note)
@@ -854,6 +887,16 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
     if people:
         result.reasons.append("named people: " + "; ".join(f"{p.name} ({p.role}, {p.source})" for p in people))
     result.people = people
+
+    # 2e: one page naming 4+ unnamed personal addresses is a product mockup or a directory, not the team.
+    per_page: dict[str, int] = {}
+    for c in cands:
+        if c.source == "website" and not c.name and c.confidence == "verified":
+            per_page[c.source_url] = per_page.get(c.source_url, 0) + 1
+    for c in [c for c in cands if c.source == "website" and not c.name and per_page.get(c.source_url, 0) >= MOCKUP_ADDRESSES]:
+        cands.remove(c)
+        result.excluded.append((c.email, f"one of {per_page[c.source_url]} unnamed addresses on {c.source_url} "
+                                         "(sample data or a directory, not the team)"))
 
     # Dedupe (best version of each address), drop domains without MX and the do-not-contact
     # list, then rank.
@@ -914,13 +957,19 @@ def build_targets(store, profile: Profile, seeds: list, client=None, log: Log = 
     """Role targets (companies with an A/B opening, minus marketplaces), then India general-outreach targets."""
     discovered = {name_key(r["name"]): r for r in store.conn.execute("SELECT * FROM companies")}
     seed_sites = {f"{s.ats}:{s.slug}": s.website for s in seeds if s.website}
+    yc_sites = {r["key"]: r["website"] or "" for r in store.conn.execute(
+        "SELECT key, website FROM pool_companies WHERE key LIKE 'yc:%'")}
     targets: dict[str, Target] = {}
-    for row in store.ranked(("A", "B")):
+    for row in store.role_rows():            # A/B openings, plus 2e postings that passed their filters
         if row["contact_hint"] == MARKETPLACE_HINT:
             continue
         key_name = name_key(row["company"])
         disc = discovered.get(key_name)
-        key = disc["key"] if disc else f"co:{key_name}"
+        board = row["board_key"] or ""
+        if board.startswith("ycjobs:"):      # 2e: a YC company's own jobs page
+            key = f"yc:{board.split(':', 1)[1]}"
+        else:
+            key = disc["key"] if disc else f"co:{key_name}"
         target = targets.get(key)
         if target is None:
             target = targets[key] = Target(
@@ -928,7 +977,7 @@ def build_targets(store, profile: Profile, seeds: list, client=None, log: Log = 
                 team_size=row["team_size"] if row["team_size"] is not None else (disc["team_size"] if disc else None),
                 board_size=row["board_size"], yc_slug=key[3:] if key.startswith("yc:") else "")
             sources = [("seeds.yaml", seed_sites.get(row["board_key"] or "", "")),
-                       ("discovery", disc["website"] if disc else "")]
+                       ("discovery", disc["website"] if disc else ""), ("YC directory", yc_sites.get(key, ""))]
             job = store.get_job(row["id"])
             if job and job.source == "hn":
                 sources.append(("HN header", hn_header_website(job)))
@@ -984,7 +1033,7 @@ def read_no_pages(check) -> bool:
     if check is None or not check["domain"]:
         return False
     reasons = json.loads(check["details"] or "{}").get("reasons", [])
-    return any(r.startswith("website: read 0 page(s)") for r in reasons)
+    return any(re.match(r"website(?: \(deep\))?: read 0 page\(s\)", r) for r in reasons)
 
 
 def pending_targets(store, targets: list[Target], days: int, force: bool = False,

@@ -438,7 +438,10 @@ class Tier3GateTests(unittest.TestCase):
         cobalt = [it for it in batch.items if it.domain == "cobalt.example"]
         self.assertEqual(len(cobalt), 1)
         self.assertEqual(cobalt[0].target_id, "manual-cobalt")          # tier 1 (address given) beats tier 2
-        self.assertEqual(batch.skipped_same_company, 1)
+        # 2e: the other target for the company is marked a duplicate when items are built, not only per batch
+        items = {it.target_id: it for it in build_items(store, PROFILE)}
+        self.assertEqual(items["yc-cobalt"].status, "duplicate")
+        self.assertEqual(batch.skipped_same_company, 0)
 
 
 class BounceTests(unittest.TestCase):

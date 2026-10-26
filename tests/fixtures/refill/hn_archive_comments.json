@@ -1,0 +1,75 @@
+{
+ "nbPages": 1,
+ "hits": [
+  {
+   "objectID": "9101",
+   "parent_id": 9001,
+   "author": "kestrelhq",
+   "created_at": "2026-10-02T10:00:00Z",
+   "comment_text": "Kestrel Labs | Backend Engineer Intern | Bengaluru, India | ONSITE | https://kestrel.example<p>We build payment APIs in Python and FastAPI on PostgreSQL. Interns welcome, 2027 batch.<p>Email jobs@kestrel.example with your resume and a line about something you built."
+  },
+  {
+   "objectID": "8101",
+   "parent_id": 8001,
+   "author": "kestrelhq",
+   "created_at": "2026-09-02T10:00:00Z",
+   "comment_text": "Kestrel Labs | Backend Engineer Intern | Bengaluru, India | ONSITE | https://kestrel.example<p>Older post. Email jobs@kestrel.example."
+  },
+  {
+   "objectID": "8102",
+   "parent_id": 8001,
+   "author": "mayapatel",
+   "created_at": "2026-09-03T09:00:00Z",
+   "comment_text": "Driftwave | Software Engineer (New Grad) | REMOTE (Worldwide) | Full-time | https://driftwave.example<p>Python and FastAPI services for logistics data. New grads welcome.<p>Write to Maya Patel, CTO: maya.patel@driftwave.example"
+  },
+  {
+   "objectID": "9102",
+   "parent_id": 9001,
+   "author": "bayside",
+   "created_at": "2026-10-02T11:00:00Z",
+   "comment_text": "Bayside | Backend Engineer | REMOTE (US only) | Full-time<p>Python services. New grads welcome. Email jobs@bayside.example"
+  },
+  {
+   "objectID": "9103",
+   "parent_id": 9001,
+   "author": "tidalops",
+   "created_at": "2026-10-02T12:00:00Z",
+   "comment_text": "Tidal Ops | Backend Engineer Intern | Remote (Worldwide)<p>[FILLED] Thanks everyone. Email hiring@tidal.example"
+  },
+  {
+   "objectID": "9104",
+   "parent_id": 9001,
+   "author": "quartz",
+   "created_at": "2026-10-03T08:00:00Z",
+   "comment_text": "Quartz | Senior Backend Engineer | Bengaluru, India | Full-time<p>5+ years of experience with Python. Email hr@quartz.example"
+  },
+  {
+   "objectID": "9105",
+   "parent_id": 9001,
+   "author": "northwind",
+   "created_at": "2026-10-03T09:00:00Z",
+   "comment_text": "Northwind | Backend Engineer Intern | Remote (India) | https://northwind.example<p>Apply at https://northwind.example/jobs. Python, FastAPI."
+  },
+  {
+   "objectID": "9106",
+   "parent_id": 9001,
+   "author": "nimbus",
+   "created_at": "2026-10-03T10:00:00Z",
+   "comment_text": "Nimbus Labs | Backend Engineer Intern | Bengaluru, India | https://nimbus.example<p>Python and FastAPI. Email priya@nimbus.example"
+  },
+  {
+   "objectID": "9107",
+   "parent_id": 9001,
+   "author": "blocked",
+   "created_at": "2026-10-03T11:00:00Z",
+   "comment_text": "Blocked Co | Backend Engineer Intern | Remote (Worldwide) | https://blocked.example<p>Python. Email jobs@blocked.example"
+  },
+  {
+   "objectID": "9199",
+   "parent_id": 9101,
+   "author": "someone",
+   "created_at": "2026-10-04T11:00:00Z",
+   "comment_text": "Is this still open? Email me at x@y.example"
+  }
+ ]
+}

@@ -65,8 +65,14 @@ funding:
     index: https://inc42.com/tag/funding-galore/
     company_page: "https://inc42.com/company/{slug}/"     # the startup's profile, which links its website
     max_articles: 30
-# Skipped: Entrackr's weekly reports (robots.txt allows them, but deals are in prose with no websites;
-# Inc42 covers the same weeks as a table), YourStory (funding pages are script-rendered).
+  - id: entrackr
+    kind: entrackr                 # 2e: weekly reports found in Entrackr's daily sitemaps (robots.txt allows them)
+    label: Entrackr weekly funding reports
+    weeks: 12
+# Entrackr's deals are prose with no websites: refill.parse_entrackr_deals reads the deal paragraphs (reviewed
+# lists in data/entrackr_deals.json win), and a website is accepted only from a likely domain whose homepage
+# names the company (with an India or sector signal) and has MX records.
+# Skipped: YourStory (funding pages are script-rendered).
 
 github_lists:
   - id: bangalore-startups

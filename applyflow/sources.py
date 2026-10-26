@@ -446,10 +446,12 @@ def merge(companies: list[PoolCompany]) -> list[PoolCompany]:
 
 def attach_funding(pool: list[PoolCompany], rounds: list[FundingRound], client=None, cfg: dict | None = None,
                    resolved: dict[str, str] | None = None, log: Log = lambda _: None,
-                   wanted: Callable[[FundingRound], bool] = lambda _: True) -> tuple[list[PoolCompany], dict]:
+                   wanted: Callable[[FundingRound], bool] = lambda _: True,
+                   resolve: Callable[[FundingRound], str] | None = None) -> tuple[list[PoolCompany], dict]:
     """Attach each round to the pool company it names (by website domain, else by name). A round
     matching nothing gets the startup's website from its Inc42 profile (when `client` is given and
-    `wanted(round)`), becoming a new pool company; still unresolved, it's dropped.
+    `wanted(round)`) - or from `resolve(round)` (2e: Entrackr, likely domains) - becoming a new pool
+    company; still unresolved, it's dropped.
 
     `resolved` caches name_key -> website ('' = looked up, none) across runs. Returns (pool, stats)."""
     resolved = resolved if resolved is not None else {}
@@ -468,7 +470,10 @@ def attach_funding(pool: list[PoolCompany], rounds: list[FundingRound], client=N
             target = new[key]
         if target is None:
             site = resolved.get(key)
-            if site is None and client is not None and cfg and cfg.get("company_page") and wanted(r):
+            if site is None and resolve is not None and wanted(r):
+                stats["lookups"] += 1
+                site = resolved[key] = resolve(r)
+            elif site is None and client is not None and cfg and cfg.get("company_page") and wanted(r):
                 stats["lookups"] += 1
                 url = str(cfg["company_page"]).format(slug=inc42_slug(r.company))
                 try:
@@ -482,7 +487,8 @@ def attach_funding(pool: list[PoolCompany], rounds: list[FundingRound], client=N
                 if target is None:
                     target = PoolCompany(key=_pool_key(domain), name=r.company, website=site, domain=domain,
                                          sources=[f"funding:{r.source}"], source_urls=[r.source_url],
-                                         tags=[t for t in (r.sector, r.subsector) if t], locations="India")
+                                         tags=[t for t in (r.sector, r.subsector) if t], locations="India",
+                                         description=r.sector if r.source == "entrackr" else "")
                     new[key] = by_domain[domain] = target
                     stats["resolved"] += 1
         if target is None:

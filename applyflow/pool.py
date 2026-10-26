@@ -253,7 +253,7 @@ def rank_key(s: Scored) -> tuple:
 
 
 def select(scored: list[Scored], fixed: dict[str, str], profile: Profile, outside: int,
-           site_texts: dict[str, str] | None = None) -> list[Scored]:
+           site_texts: dict[str, str] | None = None, today: date | None = None) -> list[Scored]:
     """Rank everything; mark the fixed companies (domain -> why) and the best of the rest as selected,
     up to `target_size` targets in all. Fixed companies take slots too, and `outside` slots are already taken
     by targets that aren't in the pool (role / manual targets without a pool record)."""
@@ -284,7 +284,8 @@ def select(scored: list[Scored], fixed: dict[str, str], profile: Profile, outsid
         if kind:
             s.why_selected = f"not selected: tech-fit floor - {why}"
             continue
-        if slots <= 0:
+        recent = recent_funding(c, today, int(cfg.get("recent_funding_weeks", 12))) if today else None
+        if slots <= 0 and recent is None:
             s.why_selected = "not selected: below the top ~400"
             continue
         if c.region != "india":
@@ -292,9 +293,21 @@ def select(scored: list[Scored], fixed: dict[str, str], profile: Profile, outsid
                 s.why_selected = f"not selected: remote-global cap ({remote_cap}) reached"
                 continue
             remote += 1
+        if slots <= 0:
+            s.selected, s.why_selected = True, f"selected: funded in the last {cfg.get('recent_funding_weeks', 12)} " \
+                                               f"weeks ({recent.round or 'round'} {recent.date}, 2e)"
+            continue
         s.selected, s.why_selected = True, f"selected: rank {i} by hiring likelihood"
         slots -= 1
     return scored
+
+
+def recent_funding(c: PoolCompany, today: date, weeks: int = 12) -> FundingRound | None:
+    """2e: a sourced round reported in the last `weeks` weeks (such companies are always selected if they pass)."""
+    f = latest_funding(c)
+    if f and f.source_url and (today - date.fromisoformat(f.date)).days <= weeks * 7:
+        return f
+    return None
 
 
 @dataclass
@@ -324,7 +337,7 @@ def _fixed_targets(store, profile: Profile, pool: dict[str, PoolCompany] | set[s
     protected = store.protected_target_ids()
     fixed: dict[str, str] = {}
     role_keys = set()
-    for row in store.ranked(("A", "B")):
+    for row in store.role_rows():
         if row["contact_hint"] != MARKETPLACE_HINT:
             role_keys.add(name_key(row["company"]))
     for check in store.contact_checks():
@@ -401,17 +414,30 @@ def build_pool(store, client, profile: Profile, today: date, log: Log = print, s
     log("(c) funding news...")
     resolved = store.funding_lookups()
     for cfg in sources.get("funding") or []:
-        rounds, note = collect_funding(client, cfg, log)
+        resolve = None
+        if cfg.get("kind") == "entrackr":            # 2e: prose reports; websites from likely domains
+            from applyflow.contacts import MXChecker
+            from applyflow.refill import collect_entrackr, load_entrackr_overrides, resolve_domain
+            rounds, note = collect_entrackr(client, today, int(cfg.get("weeks", 12)), log, load_entrackr_overrides())
+            mx = MXChecker(client, store, int(profile.contacts["mx_cache_days"]))
+
+            def resolve(r: FundingRound) -> str:
+                site, why = resolve_domain(client, mx, r.company, r.sector)
+                log(f"    {r.company:<28} {'-> ' + site if site else 'unresolved'} ({why})")
+                return site
+        else:
+            rounds, note = collect_funding(client, cfg, log)
         recent = [r for r in rounds if _age(r.date, today) <= 12]
 
         def wanted(r: FundingRound) -> bool:          # only look up startups that could fit
             fit, _ = tech_fit(f"{r.company} {r.sector} {r.subsector}", profile)
             return fit != "low" and _age(r.date, today) <= 12
-        pool, stats = attach_funding(pool, recent, client, cfg, resolved, log, wanted)
+        pool, stats = attach_funding(pool, recent, client, cfg, resolved, log, wanted, resolve)
         store.save_funding_lookups(resolved)
         summary.per_source[f"funding:{cfg['id']}"] = stats["matched"] + stats["resolved"]
+        how = "a likely domain" if resolve else "their Inc42 profile"
         summary.notes[f"funding:{cfg['id']}"] = (f"{note}; {stats['matched']} matched a pool company, "
-                                                 f"{stats['resolved']} new via their Inc42 profile, "
+                                                 f"{stats['resolved']} new via {how}, "
                                                  f"{stats['dropped']} dropped (no resolvable website)")
         summary.before_dedupe += stats["resolved"]
         log(f"  {summary.notes['funding:' + str(cfg['id'])]}")
@@ -426,7 +452,7 @@ def build_pool(store, client, profile: Profile, today: date, log: Log = print, s
     site_texts = store.site_texts()
     fixed, fixed_count = _fixed_targets(store, profile, {c.domain: c for c in pool}, site_texts)
     summary.fixed_count = fixed_count
-    summary.scored = select(scored, fixed, profile, fixed_count, site_texts)
+    summary.scored = select(scored, fixed, profile, fixed_count, site_texts, today)
     summary.funding = {
         "6m": sum(1 for s in scored if (f := latest_funding(s.company)) and _age(f.date, today) <= 6),
         "12m": sum(1 for s in scored if (f := latest_funding(s.company)) and _age(f.date, today) <= 12),
@@ -470,7 +496,7 @@ def reselect(store, profile: Profile, today: date) -> tuple[list[Scored], list[C
         score, reasons = score_company(c, profile, today, c.domain in boards, contexts.get(c.key, ""))
         scored.append(Scored(c, score, reasons))
     fixed, outside = _fixed_targets(store, profile, {s.company.domain: s.company for s in scored}, site_texts)
-    out = select(scored, fixed, profile, outside, site_texts)
+    out = select(scored, fixed, profile, outside, site_texts, today)
     store.save_pool(out)
     changes = [Change(s.company, before.get(s.company.key, False), s) for s in out
                if s.selected != before.get(s.company.key, False)]

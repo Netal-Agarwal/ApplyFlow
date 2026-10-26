@@ -411,7 +411,8 @@ class SourceProofTests(unittest.TestCase):
         self.assertEqual(store.contacts_for("yc:fine")[0]["proof"], "company site")
         self.assertEqual(store.contacts_for("yc:moved")[0]["source_url"], "https://moved.example/contact")
         items = {it.target_id: it for it in build_items(store, PROFILE)}
-        self.assertEqual(items["yc-rocket"].send_tier, 3)                  # a guess now: behind the tier-3 gate
+        # a guess now (tier 3); and as a contact@ address it isn't sent to at all (2e)
+        self.assertEqual(items["yc-rocket"].status, "unsendable")
 
     def test_posting_addresses_keep_the_posting_as_proof(self):
         store = Store(":memory:")
@@ -649,7 +650,7 @@ class QueueOrderTests(unittest.TestCase):
         store = pool_company_store()
         make_queue(store, PROFILE, date(2026, 10, 21), size=1)
         later = make_queue(store, PROFILE, date(2026, 10, 22), save=False)
-        self.assertEqual([it.company for it in later.items], ["HelloCo", "InfoCo"])
+        self.assertEqual([it.company for it in later.items], ["HelloCo"])      # InfoCo: info@ is unsendable (2e)
         self.assertEqual(later.held_earlier, 1)
 
 

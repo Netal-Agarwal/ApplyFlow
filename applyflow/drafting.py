@@ -256,6 +256,7 @@ class DraftInputs:
     role_location: str = ""         # scoring location_class
     role_skills: list[str] = field(default_factory=list)
     role_text: str = ""             # the posting's text
+    role_where: str = ""            # 2e: where the opening was seen ("on your YC jobs page")
     lead_project: str = ""
     one_liner: str = ""
     homepage_title: str = ""
@@ -337,7 +338,8 @@ class DraftInputs:
 
 def display_company(name: str) -> str:
     """'Wifi Dabba, Inc.' -> 'Wifi Dabba'."""
-    cleaned = re.sub(r",?\s+(?:inc|llc|ltd|pvt\.?\s*ltd|private limited|limited|corp)\.?$", "", name.strip(), flags=re.I)
+    cleaned = re.sub(r",?\s+(?:inc|llc|ltd|pvt\.?\s*ltd|private limited|private|pvt|limited|corp)\.?$", "", name.strip(),
+                     flags=re.I)
     return cleaned or name
 
 
@@ -591,7 +593,8 @@ def template_draft(inputs: DraftInputs, facts: Facts, min_words: int = 160, max_
              f"graduating in {facts.graduation}")
     s: list[_Sentence] = []
     if inputs.kind == "role":
-        s.append(_Sentence(0, f"{intro}, and I'd like to be considered for the {inputs.role_title} role at {c}.", order=0))
+        where = f" {inputs.role_where}" if inputs.role_where else f" at {c}"
+        s.append(_Sentence(0, f"{intro}, and I'd like to be considered for the {inputs.role_title} role{where}.", order=0))
         if about:
             s.append(_Sentence(0, f"What {c} is building ({about}) is the kind of product I'd like to work on.",
                                "preferred", 1))
@@ -1072,7 +1075,8 @@ def render_packet(inputs: DraftInputs, draft: Draft, facts: Facts, meta: dict[st
                   f"- Title: {inputs.role_title}",
                   f"- Score {inputs.role_score} (tier {inputs.role_tier}) · track {inputs.role_track} · "
                   f"family {inputs.role_family} · location {inputs.role_location}",
-                  f"- Posting: {inputs.role_url}",
+                  f"- Posting: {inputs.role_url}" + (f" (seen {inputs.role_where}: say so in the opening)"
+                                                       if inputs.role_where else ""),
                   f"- Skills it matched: {', '.join(inputs.role_skills) or '-'}", "",
                   "Posting text (first 2,500 characters):", "",
                   "> " + inputs.role_text[:2500].strip().replace("\n", "\n> ")]

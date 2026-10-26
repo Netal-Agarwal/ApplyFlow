@@ -40,6 +40,7 @@ DEFAULT_FRESHNESS = {
 DEFAULT_CONTACTS = {
     "recheck_days": 30,
     "max_site_pages": 5,
+    "deep_site_pages": 12,           # 2e `contacts --deep`: pages read beyond the homepage
     "github_max_members": 10,
     "apply_only_team_size": 300,     # bigger companies: apply via the posting, no contact search
     "mx_cache_days": 30,
@@ -53,6 +54,7 @@ DEFAULT_OUTREACH = {
         "ramp_per_day": 10,            # ... if the bounce rate stays under max_bounce_rate
         "max_bounce_rate": 0.05,       # at or above this (bounces / sends), tier 3 pauses
     },
+    "general_inbox_per_day": 5,        # 2e: hello@ / hi@ / team@ emails per day (info@ / contact@: never)
     "min_words": 160,                  # draft length between the greeting and the sign-off (2d format)
     "max_words": 200,
 }
@@ -70,6 +72,7 @@ DEFAULT_DISCOVERY = {
 
 DEFAULT_POOL = {                       # Phase 2c: the ranked pool of companies to email
     "target_size": 400,                # outreach targets selected (role + manual targets included)
+    "recent_funding_weeks": 12,        # 2e: funded this recently -> selected even past target_size
     "remote_global_cap": 80,           # at most this many remote-global (non-India) companies
     "max_team_size": 300,              # bigger companies aren't picked for general outreach (apply-only)
     "weights": {

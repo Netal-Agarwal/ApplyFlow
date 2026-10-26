@@ -223,6 +223,29 @@ CREATE TABLE IF NOT EXISTS draft_rules (       -- drafts held to an older rule s
     locked_at   TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS role_matches (     -- Phase 2e: an open role that fits, per target and source
+    company_key  TEXT NOT NULL,
+    source       TEXT NOT NULL,                -- hn_archive | yc_jobs | careers | board | manual
+    match        TEXT NOT NULL,                -- yes | no | unknown
+    title        TEXT,
+    url          TEXT,
+    job_id       TEXT,                         -- jobs.id when the role is a stored posting
+    location     TEXT,
+    experience   TEXT,                         -- "Any (new grads ok)", "1+ years", ...
+    salary       TEXT,
+    new_grads_ok INTEGER,
+    posted_at    TEXT,
+    note         TEXT,                         -- why it matched, or why not
+    checked_at   TEXT NOT NULL,
+    PRIMARY KEY (company_key, source)
+);
+
+CREATE TABLE IF NOT EXISTS excluded_contacts ( -- 2e: addresses reviewed out (sales desk, mockup, wrong fit); survive re-lookups
+    email       TEXT PRIMARY KEY,
+    why         TEXT NOT NULL,
+    excluded_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS collection_runs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     board_key   TEXT NOT NULL,
@@ -271,7 +294,8 @@ class Store:
                                      ("scores", "merged_locations", "TEXT"), ("companies", "detected_from", "TEXT"),
                                      ("companies", "status_reason", "TEXT"), ("contacts", "alternates", "TEXT"),
                                      ("contacts", "mx", "TEXT"), ("outreach_events", "send_tier", "INTEGER"),
-                                     ("jobs", "poster", "TEXT"), ("contacts", "proof", "TEXT")):
+                                     ("jobs", "poster", "TEXT"), ("contacts", "proof", "TEXT"),
+                                     ("manual_targets", "role_seen", "TEXT")):
             cols = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
@@ -324,6 +348,28 @@ class Store:
                 (board_key, *seen_ids),
             ).rowcount
         return {"seen": len(jobs), "new": new, "closed": closed}
+
+    def upsert_jobs(self, board_key: str, jobs: Iterable[Job]) -> int:
+        """Save these jobs (2e archives, YC job pages) without closing the board's other jobs. Returns new ones."""
+        new = 0
+        now = _now()
+        with self.conn:
+            for job in jobs:
+                if not self.conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job.id,)).fetchone():
+                    new += 1
+                self.conn.execute(
+                    "INSERT INTO jobs (id, source, external_id, company, board_key, title, url, apply_url, description, "
+                    "locations, remote, employment_type, department, posted_at, emails, board_size, team_size, poster, "
+                    "first_seen, last_seen, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) "
+                    "ON CONFLICT(id) DO UPDATE SET company=excluded.company, title=excluded.title, url=excluded.url, "
+                    "description=excluded.description, locations=excluded.locations, remote=excluded.remote, "
+                    "employment_type=excluded.employment_type, posted_at=excluded.posted_at, emails=excluded.emails, "
+                    "team_size=excluded.team_size, poster=excluded.poster, last_seen=excluded.last_seen, active=1",
+                    (job.id, job.source, job.external_id, job.company, board_key, job.title, job.url, job.apply_url,
+                     job.description, json.dumps(job.locations), None if job.remote is None else int(job.remote),
+                     job.employment_type, job.department, job.posted_at, json.dumps(job.emails), job.board_size,
+                     job.team_size, job.poster, now, now))
+        return new
 
     def log_run(self, board_key: str, ok: bool, job_count: int | None = None, error: str | None = None) -> None:
         with self.conn:
@@ -580,14 +626,14 @@ class Store:
         return self.conn.execute("SELECT * FROM companies WHERE key = ?", (key,)).fetchone()
 
     def upsert_manual_target(self, key: str, name: str, website: str, note: str = "", email: str = "",
-                             person_name: str = "", person_role: str = "") -> None:
+                             person_name: str = "", person_role: str = "", role_seen: str = "") -> None:
         with self.conn:
             self.conn.execute(
-                "INSERT INTO manual_targets (key, name, website, note, email, person_name, person_role, added_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET name=excluded.name, "
+                "INSERT INTO manual_targets (key, name, website, note, email, person_name, person_role, added_at, "
+                "role_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET name=excluded.name, "
                 "website=excluded.website, note=excluded.note, email=excluded.email, "
-                "person_name=excluded.person_name, person_role=excluded.person_role",
-                (key, name, website, note, email.lower(), person_name, person_role, _now()))
+                "person_name=excluded.person_name, person_role=excluded.person_role, role_seen=excluded.role_seen",
+                (key, name, website, note, email.lower(), person_name, person_role, _now(), role_seen))
 
     def manual_targets(self) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM manual_targets ORDER BY name").fetchall()
@@ -728,6 +774,53 @@ class Store:
     def set_contact_proof(self, contact_id: int, url: str, proof: str) -> None:
         with self.conn:
             self.conn.execute("UPDATE contacts SET source_url = ?, proof = ? WHERE id = ?", (url, proof, contact_id))
+
+    # -- role matches (Phase 2e) ---------------------------------------------------
+
+    def save_role_match(self, company_key: str, source: str, match: str, title: str = "", url: str = "",
+                        job_id: str = "", location: str = "", experience: str = "", salary: str = "",
+                        new_grads_ok: bool = False, posted_at: str = "", note: str = "") -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO role_matches (company_key, source, match, title, url, job_id, location, experience, salary, "
+                "new_grads_ok, posted_at, note, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(company_key, source) DO UPDATE SET match=excluded.match, title=excluded.title, "
+                "url=excluded.url, job_id=excluded.job_id, location=excluded.location, experience=excluded.experience, "
+                "salary=excluded.salary, new_grads_ok=excluded.new_grads_ok, posted_at=excluded.posted_at, "
+                "note=excluded.note, checked_at=excluded.checked_at",
+                (company_key, source, match, title, url, job_id, location, experience, salary, int(new_grads_ok),
+                 posted_at, note, _now()))
+
+    def role_matches(self) -> dict[str, list[sqlite3.Row]]:
+        """company_key -> its role matches, best first (yes before unknown before no; postings before pages)."""
+        out: dict[str, list[sqlite3.Row]] = {}
+        for r in self.conn.execute(
+                "SELECT * FROM role_matches ORDER BY company_key, CASE match WHEN 'yes' THEN 0 WHEN 'unknown' THEN 1 "
+                "ELSE 2 END, CASE source WHEN 'hn_archive' THEN 0 WHEN 'yc_jobs' THEN 1 WHEN 'manual' THEN 2 "
+                "WHEN 'board' THEN 3 ELSE 4 END, posted_at DESC"):
+            out.setdefault(r["company_key"], []).append(r)
+        return out
+
+    def exclude_contact(self, email: str, why: str) -> None:
+        with self.conn:
+            self.conn.execute("INSERT INTO excluded_contacts (email, why, excluded_at) VALUES (?, ?, ?) "
+                              "ON CONFLICT(email) DO UPDATE SET why=excluded.why", (email.lower(), why, _now()))
+
+    def excluded_contacts(self) -> dict[str, str]:
+        return {r["email"]: r["why"] for r in self.conn.execute("SELECT * FROM excluded_contacts")}
+
+    def role_rows(self) -> list[sqlite3.Row]:
+        """Openings that make a role target: tier A/B, plus 2e postings (HN archive, YC job pages) that passed the
+        title / role-family / location filters even when their score is below B (tier 'skip', never 'rejected')."""
+        rows = list(self.ranked(("A", "B")))
+        seen = {r["id"] for r in rows}
+        rows += [r for r in self.conn.execute(
+            "SELECT j.*, s.score, s.tier, s.family, s.track, s.location_class, s.experience_years, s.sponsorship, "
+            "s.action, s.contact_hint, s.lead_project, s.matched_skills, s.reasons, s.merged_locations "
+            "FROM role_matches m JOIN jobs j ON j.id = m.job_id JOIN scores s ON s.job_id = j.id "
+            "WHERE m.match = 'yes' AND j.active = 1 AND s.tier = 'skip' ORDER BY s.score DESC, j.company")
+            if r["id"] not in seen]
+        return rows
 
     def _reject_reason_counts(self, limit: int = 8) -> list[tuple[str, int]]:
         """Group rejection reasons into broad categories ("asks for N+ years" -> one bucket)."""

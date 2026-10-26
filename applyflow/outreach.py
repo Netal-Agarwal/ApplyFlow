@@ -10,6 +10,10 @@ Send tiers, by how likely the address is to arrive:
   2 = a published inbox (or a pattern-confirmed / fallback address)
   3 = a guessed address - gated by `outreach.tier3` (see tier3_gate): unlocked 2 days after the
       first mark-sent with zero bounces, 5 a day, then 10 a day, paused at a 5% bounce rate
+
+Phase 2e: info@ / contact@ addresses are never sent to (status "unsendable" when nothing else is left),
+hello@ / hi@ / team@ are capped at `outreach.general_inbox_per_day` a day, and two targets for one company
+never both go out (the second is a "duplicate").
 """
 
 from __future__ import annotations
@@ -36,12 +40,14 @@ from applyflow.text import page_summary
 Log = Callable[[str], None]
 
 STATUS_ORDER = {"ready": 0, "sent": 1, "exhausted": 2, "stopped": 2, "do_not_contact": 3, "no_contact": 4, "apply_only": 5,
-                "no_domain": 6, "dropped": 7}
+                "no_domain": 6, "dropped": 7, "unsendable": 8, "duplicate": 9}
 STATUS_LABELS = {"ready": "ready to send", "sent": "sent", "exhausted": "every address bounced",
                  "stopped": "bounced; its other addresses are on hold",
                  "do_not_contact": "on the do-not-contact list", "no_contact": "no contact found",
                  "apply_only": "apply via the posting", "no_domain": "no website domain",
-                 "dropped": "dropped from the pool (2c.1 rules)"}
+                 "dropped": "dropped from the pool (2c.1 rules)",
+                "unsendable": "only info@ / contact@ or legal-page addresses (not sent to, 2e)",
+                "duplicate": "another target for the same company is sent, queued or ahead of it"}
 KIND_ORDER = {"role": 0, "manual": 1, "general_outreach": 2}
 
 
@@ -57,6 +63,50 @@ def contact_group(name: str, role: str, email: str, source: str) -> str:
         return role_group(role or "")
     kind = classify_address(email, small=True)
     return kind[0] if kind else "other"
+
+
+UNSENDABLE_INBOXES = {"info", "contact"}            # 2e: never sent to
+GENERAL_INBOXES = {"hello", "hi", "team"}           # 2e: capped per day
+SAFE_KINDS = ("verified_person", "founders", "hiring_inbox")
+KIND_LABELS = {"verified_person": "verified named person", "founders": "founders@", "hiring_inbox": "hiring inbox",
+               "general_inbox": "hello@ / hi@ / team@", "unsendable": "info@ / contact@ / legal page (unsendable)",
+               "guessed": "guessed", "other": "other published address"}
+
+
+_LEGAL_PAGE = re.compile(r"privacy|terms|legal|policy|polic(?:y|ies)|grievance|refund|cookie|disclaimer|"
+                         r"account-deletion|compliance", re.I)
+
+
+def legal_page_person(email: str, source_url: str, name: str = "", source: str = "website") -> bool:
+    """2e: a personal address seen only on a privacy / terms / legal page, tied to no named person: usually a
+    grievance or privacy officer, not someone who hires."""
+    from urllib.parse import urlparse
+    return (source == "website" and not name and not shared_inbox(email)
+            and bool(_LEGAL_PAGE.search(urlparse(source_url or "").path)))
+
+
+def contact_kind(email: str, confidence: str, source_url: str = "", name: str = "", source: str = "") -> str:
+    """2e: verified_person | founders | hiring_inbox (the safe kinds) | general_inbox | unsendable | guessed | other."""
+    base = _local_base(email)
+    if base in UNSENDABLE_INBOXES or (source_url and legal_page_person(email, source_url, name, source)):
+        return "unsendable"
+    if confidence == "guessed":
+        return "guessed"
+    if base in FOUNDER_INBOXES:
+        return "founders"
+    if base in HIRING_INBOXES:
+        return "hiring_inbox"
+    if base in GENERAL_INBOXES:
+        return "general_inbox"
+    if confidence == "verified" and not shared_inbox(email) and not _ROLE_LOCAL.search(email.split("@", 1)[0]):
+        return "verified_person"
+    return "other"
+
+
+# A function, not a person: "customer-success@", "partner.institute@", "sales.team@" (2e).
+_ROLE_LOCAL = re.compile(r"(?:^|[._-])(?:customer|success|partner|partners|institute|sales|support|admin|ops|"
+                         r"operations|marketing|accounts?|enquir(?:y|ies)|business|bd|media|press|events?|"
+                         r"service|services|office|desk|community)(?:$|[._-])", re.I)
 
 
 def send_tier(confidence: str, group: str) -> int | None:
@@ -85,6 +135,10 @@ class Address:
     @property
     def tier(self) -> int | None:
         return send_tier(self.confidence, self.group)
+
+    @property
+    def kind(self) -> str:
+        return contact_kind(self.email, self.confidence, self.source_url, self.name, self.source)
 
     def label(self) -> str:
         who = f"{self.name} ({self.role})" if self.name else self.role
@@ -139,6 +193,7 @@ class OutreachItem:
     hl_score: int | None = None                # hiring likelihood (Phase 2c pool), when the company is in it
     hl_reasons: list[str] = field(default_factory=list)
     queued_on: str = ""                        # an earlier stored batch holds it, not yet marked sent
+    protected: bool = False                    # queued on any day, sent / bounced, or held to an older rule set
 
     @property
     def inbox_pref(self) -> int:
@@ -180,7 +235,7 @@ class OutreachItem:
 
 def _role_rows(store) -> dict[str, list]:
     rows: dict[str, list] = {}
-    for row in store.ranked(("A", "B")):
+    for row in store.role_rows():
         if row["contact_hint"] == MARKETPLACE_HINT:
             continue
         rows.setdefault(name_key(row["company"]), []).append(row)
@@ -220,6 +275,9 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
     written = store.written_drafts()
     locked = store.draft_rules()
     pool_keys = {r["key"]: r for r in store.pool_rows()}
+    matches = store.role_matches()
+    excluded = store.excluded_contacts()
+    match_jobs = {m["job_id"]: m["source"] for ms in matches.values() for m in ms if m["job_id"]}
     pool_domains = store.pool_by_domain()
     protected = store.protected_target_ids()
     from applyflow.pool import never_cold_email
@@ -234,6 +292,12 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         manual = store.get_manual_target(key) if check["kind"] == "manual" else None
         ctx = store.get_context(key)
         kind = check["kind"]
+        role_rows = roles.get(name_key(check["company"]), [])
+        match = next((m for m in matches.get(key, []) if m["match"] == "yes"), None)
+        found_2e = [r for r in role_rows if r["id"] in match_jobs]
+        if kind != "role" and tid not in protected and (found_2e or (match and match["title"])):
+            kind = "role"                  # 2e: an opening found since the lookup (HN archive, YC jobs, careers page)
+            role_rows = found_2e
         inputs = DraftInputs(target_id=tid, company_key=key, company=display_company(check["company"]), kind=kind,
                              team_size=check["team_size"], rules=locked.get(tid, "2d"))
         prow = pool_keys.get(key) or pool_domains.get(check["domain"] or "")
@@ -259,7 +323,7 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
             inputs.website = inputs.website or ctx["website"] or ""
         if not inputs.website and check["domain"]:
             inputs.website = f"https://{check['domain']}"
-        role_rows = roles.get(name_key(check["company"]), []) if kind == "role" else []
+        role_rows = role_rows if kind == "role" else []
         if role_rows:
             r = role_rows[0]
             inputs.role_title, inputs.role_score, inputs.role_tier = r["title"], r["score"], r["tier"]
@@ -268,6 +332,10 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
             inputs.role_skills = json.loads(r["matched_skills"] or "[]")
             inputs.role_text, inputs.lead_project = r["description"] or "", r["lead_project"] or ""
             inputs.remote_global = inputs.role_location == "remote_open"
+            inputs.role_where = ROLE_WHERE.get(match_jobs.get(r["id"], ""), "")
+        elif kind == "role" and match is not None and match["title"]:      # 2e: a careers page / board / manual role
+            inputs.role_title, inputs.role_url = match["title"], match["url"] or ""
+            inputs.role_where = ROLE_WHERE.get(match["source"], "")
         elif kind == "role":                     # the opening closed or dropped below B since the lookup
             roles_then = json.loads(check["roles"] or "[]")
             inputs.role_title = re.sub(r"\s*\(\d+\)$", "", roles_then[0]) if roles_then else "Software Engineer"
@@ -278,6 +346,9 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         sent = [e for e in evs if e["event"] == "sent" and e["email"] not in bounced]
         stopped = [e for e in evs if e["event"] == "stopped"]
         remaining = [a for a in seq if a.email not in bounced]
+        if tid not in protected:           # 2e: info@ / contact@, legal-page and reviewed-out addresses are never sent to
+            remaining = [a for a in remaining if a.kind != "unsendable" and not a.proof.startswith("excluded:")
+                         and a.email not in excluded]
         item = OutreachItem(target_id=tid, company_key=key, company=inputs.company, kind=kind, status="ready",
                             inputs=inputs, draft=None, bounced=bounced, best_score=check["best_score"],
                             team_size=check["team_size"], domain=check["domain"] or "",
@@ -305,6 +376,8 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
             item.status = check["status"] if check["status"] in ("apply_only", "no_domain") else "no_contact"
         elif blocked:
             item.status, item.status_note = "do_not_contact", f"matches {blocked}"
+        elif not remaining and not bounced:
+            item.status, item.status_note = "unsendable", ", ".join(a.email for a in seq)
         elif not remaining:
             item.status = "exhausted"
         else:
@@ -318,6 +391,7 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         item.why = _why(check, inputs, kind)
         item.manual_links = _links(item)
         item.draft = _draft(inputs, facts, written.get(tid), cfg, terms)
+        item.protected = tid in protected
         items.append(item)
 
     def priority(it: OutreachItem) -> tuple:
@@ -331,9 +405,34 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
                 0 if size is not None and lo <= size <= hi else 1, size if size is not None else 10**6,
                 it.company.lower())
     items.sort(key=priority)
+    mark_duplicates(items)
+    items.sort(key=priority)
     for i, it in enumerate(items, start=1):
         it.priority = i
     return items
+
+
+def mark_duplicates(items: list[OutreachItem]) -> None:
+    """2e: one company is emailed once. A ready target whose company (domain, else name) already has a sent,
+    stopped, exhausted or protected target - or a ready one ahead of it in priority order - becomes a duplicate.
+    Queued / sent / locked targets are never changed."""
+    claimed: dict[str, str] = {}
+    for it in items:
+        if it.protected or it.status in ("sent", "stopped", "exhausted"):
+            claimed.setdefault(it.company_id, it.target_id)
+    for it in items:                       # already in priority order
+        if it.status != "ready" or it.protected:
+            continue
+        other = claimed.get(it.company_id)
+        if other and other != it.target_id:
+            it.status, it.status_note = "duplicate", f"same company as {other}"
+            continue
+        claimed[it.company_id] = it.target_id
+
+
+# Where a 2e opening was seen, as a role email says it ("the Backend Engineer role on your YC jobs page").
+ROLE_WHERE = {"hn_archive": "in your Hacker News post", "yc_jobs": "on your YC jobs page",
+              "careers": "on your careers page", "board": "on your careers page", "manual": ""}
 
 
 def _draft(inputs: DraftInputs, facts: Facts, written, cfg: dict, terms: list[str]) -> Draft:
@@ -532,6 +631,7 @@ class Batch:
     skipped_same_company: int = 0
     first_sent: str | None = None
     held_earlier: int = 0             # ready targets already in an earlier day's stored queue (not marked sent)
+    general_held: int = 0             # hello@ / hi@ / team@ targets over the daily cap (2e)
 
     @property
     def tier3_open(self) -> bool:
@@ -539,9 +639,11 @@ class Batch:
 
 
 def pick_batch(items: list[OutreachItem], day: date, size: int, history: dict, tier3_cfg: dict,
-               already: list[OutreachItem] | None = None) -> Batch:
-    """The day's emails: ready targets in priority order (tier 1, 2, then 3 within the gate), one per company."""
+               already: list[OutreachItem] | None = None, general_cap: int | None = None) -> Batch:
+    """The day's emails: ready targets in priority order (tier 1, 2, then 3 within the gate), one per company,
+    at most `general_cap` to hello@ / hi@ / team@ (2e)."""
     already = already or []
+    general = sum(1 for it in already if it.address and it.address.kind == "general_inbox")
     gate = tier3_gate(history, day, tier3_cfg)
     batch = Batch(day=day.isoformat(), items=list(already), gate=gate, first_sent=history.get("first_sent"))
     seen = {it.company_id for it in already}
@@ -558,6 +660,11 @@ def pick_batch(items: list[OutreachItem], day: date, size: int, history: dict, t
         if it.company_id in seen:
             batch.skipped_same_company += 1
             continue
+        if general_cap is not None and it.address and it.address.kind == "general_inbox":
+            if general >= general_cap:
+                batch.general_held += 1
+                continue
+            general += 1
         if it.send_tier == 3:
             if tier3 >= gate.limit:
                 batch.tier3_held += 1
@@ -566,6 +673,11 @@ def pick_batch(items: list[OutreachItem], day: date, size: int, history: dict, t
         seen.add(it.company_id)
         batch.items.append(it)
     return batch
+
+
+def _general_cap(profile: Profile) -> int | None:
+    cap = profile.outreach.get("general_inbox_per_day")
+    return None if cap in (None, "") else int(cap)
 
 
 def mark_queued(store, items: list[OutreachItem]) -> None:
@@ -588,7 +700,8 @@ def make_queue(store, profile: Profile, day: date, size: int | None = None, dnc:
     sent_today = [by_id[r["target_id"]] for r in store.queue(day.isoformat())
                   if r["target_id"] in by_id and by_id[r["target_id"]].status == "sent"
                   and by_id[r["target_id"]].sent_date == day.isoformat()]
-    batch = pick_batch(items, day, size, store.send_history(day.isoformat()), profile.outreach["tier3"], sent_today)
+    batch = pick_batch(items, day, size, store.send_history(day.isoformat()), profile.outreach["tier3"], sent_today,
+                       general_cap=_general_cap(profile))
     if save:
         store.save_queue(day.isoformat(), [(it.target_id, it.address.email, it.send_tier)
                                            for it in batch.items if it.status == "ready"],
@@ -603,7 +716,7 @@ def stored_or_preview_batch(store, profile: Profile, items: list[OutreachItem],
     rows = store.queue(day.isoformat())
     mark_queued(store, items)
     batch = pick_batch(items, day, int(profile.outreach["daily_batch"]), store.send_history(day.isoformat()),
-                       profile.outreach["tier3"])
+                       profile.outreach["tier3"], general_cap=_general_cap(profile))
     if rows:
         return [by_id[r["target_id"]] for r in rows if r["target_id"] in by_id], True, batch.gate
     return batch.items, False, batch.gate
@@ -675,12 +788,17 @@ def mark_bounced(store, profile: Profile, tid: str, day: date, dnc: DoNotContact
 
 def add_target(store, profile: Profile, client, company: str, website: str, note: str = "", email: str = "",
                person: str = "", role: str = "", dnc: DoNotContact | None = None, log: Log = lambda _: None,
-               out_dir: Path | None = None) -> OutreachItem:
-    """Create a manual target, find a contact unless an email is given, and write its draft and packet."""
+               out_dir: Path | None = None, role_seen: str = "", before_drafts: Callable[[str], None] | None = None
+               ) -> OutreachItem:
+    """Create a manual target, find a contact unless an email is given, and write its draft and packet.
+    `role_seen` (2e import-targets) is an opening you saw: recorded as a role match, so the email cites it;
+    `before_drafts(key)` runs after the contact lookup, before drafts are built (role checks)."""
     from applyflow.contacts import GitHubBudget, MXChecker, find_contacts
     dnc = dnc or DoNotContact()
     key = f"manual:{name_key(company) or re.sub(r'[^a-z0-9]+', '', company.lower())}"
-    store.upsert_manual_target(key, company, normalize_website(website), note, email, person, role)
+    store.upsert_manual_target(key, company, normalize_website(website), note, email, person, role, role_seen)
+    if role_seen:
+        store.save_role_match(key, "manual", "yes", title=role_seen, note="the role you saw (import-targets)")
     row = store.get_manual_target(key)
     target = manual_target(row, profile)
     if email:
@@ -695,6 +813,8 @@ def add_target(store, profile: Profile, client, company: str, website: str, note
         mx = MXChecker(client, store, int(profile.contacts["mx_cache_days"])) if client is not None else None
         result = find_contacts(client, target, profile, dnc, GitHubBudget(), log=log, mx=mx)
         store.save_contact_result(result)
+    if before_drafts is not None:
+        before_drafts(key)
     items = refresh_drafts(store, profile, dnc)
     it = next(i for i in items if i.company_key == key)
     if out_dir is not None:

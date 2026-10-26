@@ -31,6 +31,7 @@ decision-maker. Big companies are kept but mostly filter out (senior roles).
    - **2c.1 quality cleanup - done (2026-10-20)**, see "Phase 2c.1 notes" and `tests/test_pool_2c1.py`.
    - **2d email format + bounce-safe batches - done (2026-10-22)**, see "Phase 2d notes" and
      `tests/test_format_2d.py`.
+   - **2e refill with safe contacts - done (2026-10-27)**, see "Phase 2e notes" and `tests/test_refill_2e.py`.
 3. Sending & follow-ups: Gmail API (OAuth) from the user's **personal Gmail**.
    Ramp from ~10-15/day to 30-40/day max. Randomized gaps, business hours in the
    recipient's timezone, no open-tracking pixels, resume linked (attached only for recruiters/HR or
@@ -84,6 +85,13 @@ python -m applyflow pool [--rescore]   # 2c: every source -> deduped pool, hirin
 python -m applyflow pool --reselect    # 2c.1: re-apply large-company / tech-fit rules offline, refill dropped slots
 python -m applyflow contacts --limit 50 [--retry-unread]   # resumable batches with an ETA
 python -m applyflow verify-sources     # every published address must appear on the company's own site
+python -m applyflow hn-archive --from 2026-05 --to 2026-10   # 2e: HN "Who is hiring?" archive -> role targets
+python -m applyflow yc-jobs            # 2e: ycombinator.com/companies/<slug>/jobs for every YC pool company
+python -m applyflow import-targets     # 2e: config/private/manual_targets.txt (Company | website | role seen | note)
+python -m applyflow role-check [--all] # 2e: role match from the ATS board / careers page
+python -m applyflow contacts --deep    # 2e: 12 more pages (footer, privacy, terms, team, join-us) for unsafe targets
+python -m applyflow pool --reselect --target-size 650   # 2e: a bigger selection for one run
+python -m applyflow safe-contacts      # 2e: unsent contacts by type, sending days covered
 pytest
 ```
 
@@ -334,6 +342,67 @@ Open points:
 2. **Hiring inboxes bounce too**: both 2026-10-22 bounces were careers@ / jobs@ (published on the site, MX ok).
    The bounce_rank order assumes hiring inboxes are safer than founders@ - revisit with more send data.
 3. 119 ready targets (e.g. Maya Labs, MixRank in the 2026-10-23 batch) still go out on the template.
+
+## Phase 2e notes (refill with safe contacts, 2026-10-23 .. 27)
+
+- **Safe** = verified named person, founders@, hiring inbox (careers@ / jobs@ / talent@ / hr@ / work@ / join-us@ ...)
+  (`outreach.contact_kind`, `SAFE_KINDS`). hello@ / hi@ / team@ are capped at `outreach.general_inbox_per_day` (5) in
+  `pick_batch`; **info@ / contact@ are never sent to** (status "unsendable"). Also unsendable: an unnamed personal
+  address seen only on a privacy / terms / legal page (grievance or privacy officers: `legal_page_person`), and any
+  address in the `excluded_contacts` table (reviewed out: sales desk, mockup names, wrong fit; survives re-lookups).
+  Role-word locals (customer-success@, partner.institute@) aren't people. A page naming 4+ unnamed personal
+  addresses is a mockup or directory (`MOCKUP_ADDRESSES`; Intryc's ticket mockup had 10). Queued / sent / locked
+  targets keep their addresses.
+- **One company once** (`mark_duplicates`): a ready target whose domain (else name) already has a sent, stopped,
+  exhausted or protected target - or a better ready one - becomes "duplicate".
+- **Sources** (`refill.py`), each records a `role_matches` row (yes / no / unknown + title, url, experience, salary):
+  1. HN archive (`hn-archive`): threads via Algolia `numericFilters`; a post is kept when not filled (`is_filled`),
+     a header role passes the title + family filters (`best_header_role`: plurals, "(Rust, MySQL)" kept), score_job
+     isn't rejected, the location is India / remote_open, and `extract_contact_emails` finds an address. Newest post
+     per company; contacted / DNC companies skipped (`Existing`). Jobs stored with `upsert_jobs` (never closes
+     others). Live: 6 threads, 1,478 posts, kept 4 (1,075 no fitting header role, 286 abroad / restricted, 45 years).
+     Usable: Logen.io (queued) and CyberAtlas (its post asks for a Finder query and an "HN Software Engineer"
+     subject: do it by hand). Proxybase and ArtCraft need Rust: excluded.
+  2. YC job pages (`yc-jobs`): the /jobs page's data-page JSON (title, location, type, minExperience, salary,
+     skills), the job page fetched for keepers; eng roles, intern / new grad / no stated experience, India or
+     remote-India ("IN" -> India). Board key `ycjobs:<slug>`, target key `yc:<slug>`. Live: 495 pages, 148 with
+     postings, 602 postings, 3 fit at 2 companies (Cardboard x2 "new grads OK"; ClickPe intern, listed 3+ years ago:
+     deactivated as stale). Most postings are non-engineering (359), senior (129) or "1+ years" (56).
+  3. Entrackr (`kind: entrackr` in sources.yaml): weekly reports found in Fri-Sun daily sitemaps; `report_text` +
+     `parse_entrackr_deals` read the prose; `data/entrackr_deals.json` (reviewed by hand: 169 deals in 12 reports)
+     wins. Websites from `domain_candidates` + `homepage_matches` (names the company and shows an India or sector
+     signal, so circle.com isn't "Circle") + MX. Live: 108 matched pool companies, 21 resolved, 40 dropped; after the
+     2c.1 rules 4 new targets (Disha, Piston, Firi, Swish). Inc42 refreshed (472 rounds, 24 weeks). Companies funded
+     in the last `pool.recent_funding_weeks` (12) are selected past `target_size` when they pass the rules.
+  4. `import-targets`: config/private/manual_targets.txt, "Company | website | role seen | note"; contact lookup,
+     tech fit, role match (the role seen; else YC jobs page, ATS board, careers page), packet + draft (a role email
+     when a role is seen or found). The file is created with a header and 2 commented examples; empty so far.
+- **Deep search** (`contacts --deep`, `deep_pages`): footer links, then /team /about-us /careers /jobs /join /join-us
+  /contact /privacy /terms ..., 12 pages; only targets with no safe contact, never protected ones; a site that reads
+  0 pages keeps its stored contacts. Founders' own addresses often sit on privacy pages (grievance officer): kept when
+  the name matches; unnamed ones there are unsendable.
+- **Email regex fix**: `text._EMAIL_RE` / `_OBFUSCATED_EMAIL_RES` are anchored at a token start and length-capped;
+  unanchored, they took minutes on alphabetalabs.com (long unbroken text) and stalled the deep search.
+- **Resume update (2026-10-26)**: facts re-read from the new resume (skills + HTML/CSS, automated API testing, Apache
+  Spark, Hadoop, XGBoost, NLP, GitHub; - Node.js, Express.js, microservices, MySQL, system design; Judicial AI System
+  on Spark / Hadoop over "1,500+ court judgments"; project dates; DRDO across 8 scenarios; patent application number).
+  67 unsent drafts had "legal case files" -> "court judgments"; no draft started failing.
+- Live 2026-10-27: targets 481 -> 730 (`pool --reselect --target-size 650`). Safe unsent contacts: 1 before, 29 now
+  (25 newly found: 12 by normal lookups of new targets, 13 by the deep search, 2 HN posts; 4 already stored but not
+  sendable before), 28 of them in the stored **2026-10-27 batch** (7 verified people, 17 hiring inboxes, 4 founders@;
+  Claude drafts from `output/drafts/drafts_2e.py` + `openings_2e.json`). After it: 1 safe, 41 hello@, 30 other
+  published, 228 guessed. Sent so far 60, bounced 6 (hello@ 3/19, hiring inbox 2/24, info@ / contact@ 1/2, verified
+  people 0/8, founders@ 0/7): tier 3 is paused (10% >= 5%).
+
+Open points:
+1. **Safe supply is exhausted** after the 27 Oct batch (the next day has 1 safe + 5 hello@). Indian startups rarely
+   publish founders@ / careers@; the remaining lever is the 228 guessed founders (34 with a same-format published
+   address on their domain), which needs a tier-3 decision: the gate can't reopen while the bounce rate is 10%.
+2. hello@ bounced 3 of 19 (16%): keep it capped; consider skipping hello@ at very small companies.
+3. YC "1+ years" roles (56) are excluded by the intern / new grad / no-experience rule; the profile's
+   max_years_required is 1, so loosening that rule would add a few YC role targets (Infinity, AlgoTest, Apollo).
+4. Careers-page role matching is a text heuristic ("AI/ML Engineer Engineering"); 18 of 26 funded targets came back
+   unknown.
 
 ## Calibration backlog
 

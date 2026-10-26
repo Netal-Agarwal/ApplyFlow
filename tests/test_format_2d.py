@@ -281,7 +281,9 @@ class BounceStopAndOrderTests(unittest.TestCase):
                         contacts=[contact(email, conf, name, "Founder" if name else f"{slug}@ inbox")])
         order = [it.target_id for it in build_items_(store) if it.status == "ready"]
         self.assertEqual(set(order[:2]), {"yc-person", "yc-staff"})        # stored name, or a first.last address
-        self.assertEqual(order[2:], ["yc-careers", "yc-founders", "yc-hello", "yc-relief", "yc-info", "yc-guess"])
+        self.assertEqual(order[2:], ["yc-careers", "yc-founders", "yc-hello", "yc-relief", "yc-guess"])
+        # 2e: info@ / contact@ are never sent to
+        self.assertEqual({it.target_id: it.status for it in build_items_(store)}["yc-info"], "unsendable")
 
     def test_daily_batch_default_is_30(self):
         from applyflow.config import DEFAULT_OUTREACH

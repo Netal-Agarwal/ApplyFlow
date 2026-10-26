@@ -1,0 +1,8 @@
+# ApplyFlow manual targets
+# Company | website | role seen (optional) | note (optional)
+
+Acme Robotics | acme-robotics.example | Backend Engineer Intern | seen on Wellfound | Bengaluru
+Nimbus Data | https://www.nimbusdata.example/careers |  | data infra, seed
+Lonely Co
+Bad Site | not a website
+# Commented Co | commented.example
