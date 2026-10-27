@@ -42,7 +42,16 @@ _NOT_A_COMPANY = re.compile(
     r"wellfound\.com|tracxn\.com|inc42\.com|yourstory\.com|entrackr\.com|ycombinator\.com|hsforms\.com|"
     r"bit\.ly|linktr\.ee|notion\.so|substack\.com|economictimes\.indiatimes\.com|techcrunch\.com)$", re.I)
 
-SOURCE_PRIORITY = ["yc", "portfolio", "funding", "list"]       # whose data wins when sources disagree
+# whose data wins when sources disagree (2f: fintech lists and consultancy seeds after funding news)
+SOURCE_PRIORITY = ["yc", "portfolio", "funding", "fintech", "consultancy", "list"]
+
+# 2f: fintech words in a company's tags, sector or one-liner.
+FINTECH_WORDS = re.compile(r"\b(?:fin-?tech|payments?|payment gateway|lending|lender|loans?|credit (?:card|line|score|"
+                           r"bureau|infrastructure)|credit and lending|banking(?: and exchange)?|neo-?bank|upi|"
+                           r"wealth-?tech|wealth management|insur-?tech|insurance|nbfc|remittances?|forex|treasury|"
+                           r"invoic(?:e|es|ing)|account aggregator|kyc|card issuing|bnpl|brokerage|mutual funds?|"
+                           r"consumer finance|asset management|financial services|stablecoins?|digital gold|"
+                           r"accounts payable|accounts receivable|collections)\b", re.I)
 
 
 @dataclass
@@ -80,6 +89,9 @@ class PoolCompany:
     region: str = "india"                                      # india | remote_global
     yc_slug: str = ""
     funding: list[FundingRound] = field(default_factory=list)
+    sector: str = ""                                           # 2f: fintech | consultancy | '' (startup / other)
+    india_friendly: str = ""                                   # 2f: why a remote-global company hires in India
+    context: dict[str, str] = field(default_factory=dict)      # 2f: verified homepage, stored as company context
 
     @property
     def kind(self) -> str:
@@ -393,6 +405,9 @@ def collect_list(client, cfg: dict[str, Any], log: Log = lambda _: None) -> tupl
     try:
         if cfg.get("format") == "name_url_json":
             companies = parse_name_url_json(json.loads(client.get_text(url)), cfg)
+        elif cfg.get("format") == "header_table":            # 2f: | Company Name | ... | website | ...
+            from applyflow.supply import parse_header_table
+            companies = parse_header_table(client.get_text(url), cfg)
         else:
             companies = parse_markdown_table(client.get_text(url), cfg)
     except (FetchError, ValueError) as exc:
@@ -429,7 +444,7 @@ def merge(companies: list[PoolCompany]) -> list[PoolCompany]:
         for url in c.source_urls:
             if url not in have.source_urls:
                 have.source_urls.append(url)
-        for attr in ("description", "locations", "batch", "yc_slug"):
+        for attr in ("description", "locations", "batch", "yc_slug", "sector", "india_friendly"):
             if not getattr(have, attr) and getattr(c, attr):
                 setattr(have, attr, getattr(c, attr))
         for attr in ("team_size", "founded_year", "hiring"):
@@ -509,6 +524,17 @@ def attach_funding(pool: list[PoolCompany], rounds: list[FundingRound], client=N
         if (r.date, r.round, r.source_url) not in {(f.date, f.round, f.source_url) for f in target.funding}:
             target.funding.append(r)
     return pool + list(new.values()), stats
+
+
+def pool_sector(c: PoolCompany) -> str:
+    """2f: 'consultancy' (from the consultancy seeds), 'fintech' (a fintech list, or fintech words in its tags,
+    funding sector or one-liner), else ''."""
+    if any(s.startswith("consultancy:") for s in c.sources):
+        return "consultancy"
+    if any(s.startswith("fintech:") for s in c.sources):
+        return "fintech"
+    text = " ".join(c.tags + [f"{r.sector} {r.subsector}" for r in c.funding] + [c.description])
+    return "fintech" if FINTECH_WORDS.search(text) else ""
 
 
 def months_ago(day: str, today: date) -> float | None:

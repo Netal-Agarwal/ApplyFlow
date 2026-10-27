@@ -14,10 +14,18 @@ Send tiers, by how likely the address is to arrive:
 Phase 2e: info@ / contact@ addresses are never sent to (status "unsendable" when nothing else is left),
 hello@ / hi@ / team@ are capped at `outreach.general_inbox_per_day` a day, and two targets for one company
 never both go out (the second is a "duplicate").
+
+Phase 2f: `queue` uses a per-type bounce gate (`type_gates`) instead of the overall 5% tier-3 gate: evidence-backed
+guesses (10 a day) and hello@ (5 a day) pause for a day after 2+ bounces in one day; hiring inboxes pause while 3+
+of their last 20 sends bounced; verified named people and founders@ are never paused by other types' bounces; pure
+pattern guesses are never sent. Other published addresses are classified (`classify_published`): hiring ones are
+sendable, support / sales / ops / billing ones aren't. A company over 300 people is emailed only at its own
+published hiring inbox (or a posting's address).
 """
 
 from __future__ import annotations
 
+import html as htmllib
 import json
 import re
 from dataclasses import dataclass, field
@@ -26,7 +34,7 @@ from pathlib import Path
 from typing import Callable
 
 from applyflow.config import Profile
-from applyflow.contacts import (FOUNDER_INBOXES, FREEMAIL, HIRING_INBOXES, DoNotContact, _local_base,
+from applyflow.contacts import (FOUNDER_INBOXES, FREEMAIL, HIRING_INBOXES, ROLE_LOCAL, DoNotContact, _local_base,
                                 classify_address, inbox_preference, manual_result, manual_target, name_from_local,
                                 needs_manual_check, role_group, search_links, shared_inbox)
 from applyflow.detect import normalize_website
@@ -34,7 +42,7 @@ from applyflow.discovery import name_key, site_domain
 from applyflow.drafting import (HR_GROUPS, Draft, DraftInputs, Facts, check_written, display_company, gmail_url,
                                 load_facts, parse_written, render_packet, STYLE_GUIDE, tech_terms, template_draft)
 from applyflow.http import FetchError
-from applyflow.scoring import MARKETPLACE_HINT
+from applyflow.scoring import APPLY_ONLY_HINT, MARKETPLACE_HINT
 from applyflow.text import page_summary
 
 Log = Callable[[str], None]
@@ -66,11 +74,13 @@ def contact_group(name: str, role: str, email: str, source: str) -> str:
 
 
 UNSENDABLE_INBOXES = {"info", "contact"}            # 2e: never sent to
-GENERAL_INBOXES = {"hello", "hi", "team"}           # 2e: capped per day
+GENERAL_INBOXES = {"hello", "hi", "team", "hey"}    # 2e: capped per day (hey@: 2f)
 SAFE_KINDS = ("verified_person", "founders", "hiring_inbox")
+SENDABLE_KINDS = SAFE_KINDS + ("evidence_guess", "general_inbox")       # 2f: what `queue` may pick
 KIND_LABELS = {"verified_person": "verified named person", "founders": "founders@", "hiring_inbox": "hiring inbox",
-               "general_inbox": "hello@ / hi@ / team@", "unsendable": "info@ / contact@ / legal page (unsendable)",
-               "guessed": "guessed", "other": "other published address"}
+               "general_inbox": "hello@ / hi@ / hey@ / team@", "evidence_guess": "evidence-backed guess",
+               "unsendable": "unsendable (info@ / contact@, legal page, support / sales / ops)",
+               "guessed": "pure pattern guess (never sent)", "other": "other published address"}
 
 
 _LEGAL_PAGE = re.compile(r"privacy|terms|legal|policy|polic(?:y|ies)|grievance|refund|cookie|disclaimer|"
@@ -85,28 +95,69 @@ def legal_page_person(email: str, source_url: str, name: str = "", source: str =
             and bool(_LEGAL_PAGE.search(urlparse(source_url or "").path)))
 
 
-def contact_kind(email: str, confidence: str, source_url: str = "", name: str = "", source: str = "") -> str:
-    """2e: verified_person | founders | hiring_inbox (the safe kinds) | general_inbox | unsendable | guessed | other."""
+def contact_kind(email: str, confidence: str, source_url: str = "", name: str = "", source: str = "",
+                 evidence: dict | str | None = None, role: str = "") -> str:
+    """verified_person | founders | hiring_inbox (the safe kinds) | general_inbox | evidence_guess (2f) | unsendable |
+    guessed (a pure pattern guess, never sent) | other (2e; 2f classifies these with classify_published)."""
     base = _local_base(email)
     if base in UNSENDABLE_INBOXES or (source_url and legal_page_person(email, source_url, name, source)):
         return "unsendable"
-    if confidence == "guessed":
-        return "guessed"
+    if confidence in ("guessed", "strong"):        # 2f: an inferred address (pattern) is a guess, seen on no page
+        return "evidence_guess" if evidence else "guessed"
     if base in FOUNDER_INBOXES:
         return "founders"
     if base in HIRING_INBOXES:
         return "hiring_inbox"
     if base in GENERAL_INBOXES:
         return "general_inbox"
-    if confidence == "verified" and not shared_inbox(email) and not _ROLE_LOCAL.search(email.split("@", 1)[0]):
+    if confidence == "verified" and not shared_inbox(email) and not ROLE_LOCAL.search(email.split("@", 1)[0]):
+        # 2f: an address on a website is a verified person only with a name and a hiring role (founder, CTO,
+        # engineering lead, recruiter); an unnamed "person at the company" may be sales or support.
+        if source == "website" and (not name or role_group(role or "") not in HIRING_PEOPLE):
+            return "other"
         return "verified_person"
     return "other"
 
 
-# A function, not a person: "customer-success@", "partner.institute@", "sales.team@" (2e).
-_ROLE_LOCAL = re.compile(r"(?:^|[._-])(?:customer|success|partner|partners|institute|sales|support|admin|ops|"
-                         r"operations|marketing|accounts?|enquir(?:y|ies)|business|bd|media|press|events?|"
-                         r"service|services|office|desk|community)(?:$|[._-])", re.I)
+HIRING_PEOPLE = {"founder", "cto", "eng_lead", "recruiting"}
+
+
+_ROLE_LOCAL = ROLE_LOCAL          # 2e name, kept for scripts that import it
+
+# 2f: what an "other" published address is. Hiring words make it a hiring inbox (sendable); support, sales, ops,
+# billing, legal, press and general contact words make it unsendable; a lone first name with no named role is
+# not confirmed as someone who hires.
+_PUBLISHED_UNSENDABLE = [
+    ("support", r"support|help|care|success|service"),
+    ("sales / business", r"sales|business|bd|crm|partner|partners|partnership|enquir|inquir|begin|demo|institute"),
+    ("operations / admin", r"admin|ops|operations|office|accounts?|finance|billing|payments?"),
+    ("legal / compliance", r"legal|compliance|grievance|privacy|nodal"),
+    ("press / media / social", r"press|media|news|newsroom|social|marketing|pr"),
+    ("general contact inbox (like info@ / contact@)", r"information|connect|reachus|reach|mail|company|enquiry|"
+                                                      r"query|queries|humans|contactus|write|talk|letstalk"),
+]
+
+
+def classify_published(email: str, role: str = "", source_url: str = "", company: str = "") -> tuple[str, str]:
+    """2f: (kind, reason) for a published address contact_kind calls 'other': hiring_inbox | general_inbox
+    (hey@-like) | unsendable."""
+    local = email.split("@", 1)[0].lower().removeprefix("mailto:")
+    words = [w for w in re.split(r"[._+-]", local) if w]
+    if _local_base(email) in HIRING_INBOXES or re.search(r"^(?:hr|careers?|jobs?|talent|recruit\w*|hiring|people)"
+                                                         r"(?:$|[._-]|india|team|desk)", local):
+        return "hiring_inbox", f"hiring inbox ({local}@)"
+    if local in GENERAL_INBOXES:
+        return "general_inbox", f"general greeting inbox ({local}@), capped like hello@"
+    for label, rx in _PUBLISHED_UNSENDABLE:
+        if any(re.fullmatch(rf"(?:{rx})\w*", w) for w in words):
+            return "unsendable", f"{label} address ({local}@), not someone who hires"
+    squashed = re.sub(r"[^a-z0-9]", "", company.lower())
+    if squashed and re.sub(r"[^a-z0-9]", "", local) in (squashed, squashed[:len(local)]):
+        return "unsendable", f"the company's own name as an inbox ({local}@): a general contact address"
+    if re.fullmatch(r"[a-z]{2,12}", local):
+        return "unsendable", (f"a personal address ({local}@) tied to no named founder, CTO or recruiter on the "
+                              f"site: role not confirmed")
+    return "unsendable", f"unrecognised address ({local}@), role not confirmed"
 
 
 def send_tier(confidence: str, group: str) -> int | None:
@@ -131,6 +182,8 @@ class Address:
     mx: str = ""
     note: str = ""                 # "alternate for <name>" / "backup contact"
     proof: str = ""                # company site | posting | manual | github profile | demoted: ...
+    evidence: dict = field(default_factory=dict)      # 2f: the proof behind a sendable guess
+    company: str = ""              # for classify_published
 
     @property
     def tier(self) -> int | None:
@@ -138,7 +191,18 @@ class Address:
 
     @property
     def kind(self) -> str:
-        return contact_kind(self.email, self.confidence, self.source_url, self.name, self.source)
+        kind = contact_kind(self.email, self.confidence, self.source_url, self.name, self.source, self.evidence,
+                            self.role)
+        return classify_published(self.email, self.role, self.source_url, self.company)[0] if kind == "other" else kind
+
+    @property
+    def kind_reason(self) -> str:
+        """Why an address is (un)sendable, for the report and explain output."""
+        kind = contact_kind(self.email, self.confidence, self.source_url, self.name, self.source, self.evidence,
+                            self.role)
+        if kind == "other":
+            return classify_published(self.email, self.role, self.source_url, self.company)[1]
+        return KIND_LABELS.get(kind, kind)
 
     def label(self) -> str:
         who = f"{self.name} ({self.role})" if self.name else self.role
@@ -151,10 +215,13 @@ def address_sequence(contacts) -> list[Address]:
     seq: list[Address] = []
     for i, c in enumerate(contacts):
         group = contact_group(c["name"] or "", c["role"] or "", c["email"], c["source"] or "")
+        keys = c.keys()
+        evidence = json.loads(c["evidence"]) if "evidence" in keys and c["evidence"] else {}
         base = Address(email=c["email"], name=c["name"] or "", role=c["role"] or "", confidence=c["confidence"],
                        group=group, source=c["source"] or "", source_url=c["source_url"] or "", mx=c["mx"] or "",
                        note="" if i == 0 else "backup contact",
-                       proof=(c["proof"] if "proof" in c.keys() else "") or "")
+                       proof=(c["proof"] if "proof" in keys else "") or "", evidence=evidence,
+                       company=c["company"] or "")
         seq.append(base)
         for alt in json.loads(c["alternates"] or "[]"):
             seq.append(Address(email=alt, name=base.name, role=base.role, confidence="guessed", group=group,
@@ -194,6 +261,8 @@ class OutreachItem:
     hl_reasons: list[str] = field(default_factory=list)
     queued_on: str = ""                        # an earlier stored batch holds it, not yet marked sent
     protected: bool = False                    # queued on any day, sent / bounced, or held to an older rule set
+    sector: str = ""                           # 2f: fintech | consultancy | startup | other
+    large: bool = False                        # 2f: over 300 people (apply-only): hiring inbox only
 
     @property
     def inbox_pref(self) -> int:
@@ -280,6 +349,15 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
     match_jobs = {m["job_id"]: m["source"] for ms in matches.values() for m in ms if m["job_id"]}
     pool_domains = store.pool_by_domain()
     protected = store.protected_target_ids()
+    # 2f: a target queued for a day but not yet sent keeps the address it was queued with; it's otherwise treated like
+    # any unsent target (its role email, the unsendable filter), so the report and drafts match the stored queue.
+    sent_ids = {e["target_id"] for e in store.events() if e["event"] in ("sent", "bounced", "stopped")}
+    queued_at: dict[str, str] = {}
+    for r in store.conn.execute("SELECT target_id, email FROM send_queue ORDER BY batch_date"):
+        queued_at[r[0]] = r[1]
+    locked_ids = set(locked)
+    pinned = {t: e for t, e in queued_at.items() if t not in sent_ids and t not in locked_ids}
+    hard_protected = protected - set(pinned)
     from applyflow.pool import never_cold_email
     events: dict[str, list] = {}
     for e in store.events():
@@ -295,11 +373,11 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         role_rows = roles.get(name_key(check["company"]), [])
         match = next((m for m in matches.get(key, []) if m["match"] == "yes"), None)
         found_2e = [r for r in role_rows if r["id"] in match_jobs]
-        if kind != "role" and tid not in protected and (found_2e or (match and match["title"])):
+        if kind != "role" and tid not in hard_protected and (found_2e or (match and match["title"])):
             kind = "role"                  # 2e: an opening found since the lookup (HN archive, YC jobs, careers page)
             role_rows = found_2e
         inputs = DraftInputs(target_id=tid, company_key=key, company=display_company(check["company"]), kind=kind,
-                             team_size=check["team_size"], rules=locked.get(tid, "2d"))
+                             team_size=check["team_size"], rules=locked.get(tid, "2f"))
         prow = pool_keys.get(key) or pool_domains.get(check["domain"] or "")
         if prow is not None and not disc:          # Phase 2c pool company (portfolio, funding, list)
             pdata = json.loads(prow["data"])
@@ -346,9 +424,16 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         sent = [e for e in evs if e["event"] == "sent" and e["email"] not in bounced]
         stopped = [e for e in evs if e["event"] == "stopped"]
         remaining = [a for a in seq if a.email not in bounced]
-        if tid not in protected:           # 2e: info@ / contact@, legal-page and reviewed-out addresses are never sent to
+        large = check["hint"] == APPLY_ONLY_HINT
+        if tid not in hard_protected:      # 2e: info@ / contact@, legal-page and reviewed-out addresses are never sent to
             remaining = [a for a in remaining if a.kind != "unsendable" and not a.proof.startswith("excluded:")
                          and a.email not in excluded]
+            if large:                      # 2f: a large company only at its own hiring inbox (or a posting's address)
+                remaining = [a for a in remaining if a.source == "posting"
+                             or (a.kind == "hiring_inbox" and a.proof == "company site")]
+            keep = next((a for a in seq if a.email == pinned.get(tid) and a.email not in bounced), None)
+            if keep is not None and keep not in remaining:          # queued before a rule changed: kept (2e)
+                remaining.insert(0, keep)
         item = OutreachItem(target_id=tid, company_key=key, company=inputs.company, kind=kind, status="ready",
                             inputs=inputs, draft=None, bounced=bounced, best_score=check["best_score"],
                             team_size=check["team_size"], domain=check["domain"] or "",
@@ -382,6 +467,11 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
             item.status = "exhausted"
         else:
             item.address, item.backups = remaining[0], remaining[1:]
+            queued_email = pinned.get(tid)
+            if queued_email and item.address.email != queued_email:      # 2f: the address it was queued with
+                pick = next((a for a in seq if a.email == queued_email), None)
+                if pick is not None:
+                    item.address, item.backups = pick, [a for a in remaining if a.email != queued_email]
         if item.address:
             a = item.address
             name = a.name or (name_from_local(a.email) if inputs.rules != "2b" else "")
@@ -390,17 +480,24 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
             item.send_tier = a.tier
         item.why = _why(check, inputs, kind)
         item.manual_links = _links(item)
+        from applyflow.supply import sector_for
+        item.large = large
+        item.sector = inputs.sector = sector_for(check["company"], prow, inputs, check["team_size"], large)
         item.draft = _draft(inputs, facts, written.get(tid), cfg, terms)
         item.protected = tid in protected
         items.append(item)
 
     def priority(it: OutreachItem) -> tuple:
-        """Tiers 1-2 together, lowest bounce risk first (bounce_rank, 2d); tier 3 after them. Then role targets,
-        hiring likelihood and inbox preference (2c)."""
+        """Tiers 1-2 together, lowest bounce risk first (bounce_rank, 2d); tier 3 after them. Then (2f) companies
+        with a hiring signal - an open role that fits, a funding round in the last 6 months, or more than 20
+        people - then role targets, hiring likelihood and inbox preference (2c)."""
         size = it.team_size
         low_risk = it.send_tier in (1, 2)
-        return (STATUS_ORDER.get(it.status, 9), 0 if low_risk else it.send_tier or 9,
-                it.bounce_rank if low_risk else 0, KIND_ORDER.get(it.kind, 3),
+        signal = it.kind == "role" or bool(it.inputs.funding.get("recent")) or (size or 0) > 20
+        # 2f: capped hello@ / hi@ / team@ come after the evidence-backed guesses (tier 3)
+        general = bool(it.address) and it.address.kind == "general_inbox"
+        return (STATUS_ORDER.get(it.status, 9), 3.5 if general else (0 if low_risk else it.send_tier or 9),
+                it.bounce_rank if low_risk else 0, 0 if signal else 1, KIND_ORDER.get(it.kind, 3),
                 -(it.hl_score if it.hl_score is not None else -1), it.inbox_pref, -(it.best_score or 0),
                 0 if size is not None and lo <= size <= hi else 1, size if size is not None else 10**6,
                 it.company.lower())
@@ -632,23 +729,142 @@ class Batch:
     first_sent: str | None = None
     held_earlier: int = 0             # ready targets already in an earlier day's stored queue (not marked sent)
     general_held: int = 0             # hello@ / hi@ / team@ targets over the daily cap (2e)
+    gates: dict = field(default_factory=dict)          # 2f: kind -> TypeGate
+    fresh: list = field(default_factory=list)          # 2f: FreshCheck per re-checked address
+    held_by_kind: dict = field(default_factory=dict)   # 2f: kind -> targets its gate left out
 
     @property
     def tier3_open(self) -> bool:
         return self.gate.open
 
 
+# ---------------------------------------------------------------------------
+# Phase 2f: per-type bounce gate
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TypeGate:
+    """How many addresses of one contact kind a day's batch may hold, and why."""
+    kind: str
+    state: str                        # open | capped | paused | closed
+    limit: int | None                 # None = no daily limit
+    reason: str
+
+
+@dataclass
+class SendRecord:
+    day: str                          # the send's date
+    kind: str
+    bounced_on: str = ""              # the bounce's date ('' = not bounced)
+
+
+def type_gates(sends: list[SendRecord], day: date, cfg: dict) -> dict[str, TypeGate]:
+    """2f, per contact kind: verified named people and founders@ always open (no other type's bounces count);
+    evidence-backed guesses (`evidence_guess_per_day`) and hello@ (`general_inbox_per_day`) capped, and paused on
+    the day after one with `day_bounces_pause`+ of their bounces (and that day itself, once recorded); hiring
+    inboxes paused while `hiring_max_bounces`+ of their last `hiring_window` sends bounced; pure guesses and
+    unsendable addresses closed."""
+    g = cfg["type_gates"]
+    pause_at = int(g["day_bounces_pause"])
+    today, yesterday = day.isoformat(), (day - timedelta(days=1)).isoformat()
+    gates = {k: TypeGate(k, "open", None, "open: never paused by other types' bounces")
+             for k in ("verified_person", "founders")}
+    for kind, cap in (("evidence_guess", int(g["evidence_guess_per_day"])),
+                      ("general_inbox", int(cfg.get("general_inbox_per_day") or 5))):
+        mine = [s for s in sends if s.kind == kind]
+        recent = {d: sum(1 for s in mine if s.bounced_on == d) for d in (yesterday, today)}
+        hit = next((d for d in (today, yesterday) if recent[d] >= pause_at), "")
+        if hit:
+            gates[kind] = TypeGate(kind, "paused", 0, f"paused: {recent[hit]} bounced on {hit} "
+                                                      f"({pause_at}+ in one day pause it the next day)")
+        else:
+            gates[kind] = TypeGate(kind, "capped", cap, f"up to {cap}/day; {sum(1 for s in mine if s.bounced_on)} "
+                                                       f"bounce(s) in {len(mine)} send(s) so far")
+    window, most = int(g["hiring_window"]), int(g["hiring_max_bounces"])
+    last = sorted((s for s in sends if s.kind == "hiring_inbox" and s.day <= today), key=lambda s: s.day)[-window:]
+    bad = sum(1 for s in last if s.bounced_on)
+    gates["hiring_inbox"] = (TypeGate("hiring_inbox", "paused", 0, f"paused: {bad} of the last {len(last)} hiring-inbox "
+                                                                  f"sends bounced ({most}+ of {window})")
+                             if bad >= most else
+                             TypeGate("hiring_inbox", "open", None, f"open: {bad} of the last {len(last)} hiring-inbox "
+                                                                    f"sends bounced (pauses at {most} of {window})"))
+    gates["guessed"] = TypeGate("guessed", "closed", 0, "closed: a pure pattern guess is never sent (2f)")
+    gates["unsendable"] = TypeGate("unsendable", "closed", 0, "closed: support / sales / ops / info@ / contact@")
+    gates["other"] = TypeGate("other", "closed", 0, "closed: unclassified address")
+    return gates
+
+
+@dataclass
+class BatchRules:
+    """2f: rows a batch never takes - a target without a validated Claude draft (`require_written_draft`), and
+    hello@ / hi@ / team@ anywhere but a small startup (`general_inbox_max_team`, sector startup)."""
+    require_written: bool = False
+    general_max_team: int | None = None
+    state: str = "rules"
+    limit: int | None = None
+    reason: str = ""
+
+    def holds(self, it: "OutreachItem") -> str:
+        if self.require_written and it.draft is not None and it.draft.source != "claude":
+            return "no validated Claude draft"
+        kind = it.address.kind if it.address else ""
+        if kind == "general_inbox" and self.general_max_team is not None and (
+                it.sector != "startup" or (it.team_size or 0) > self.general_max_team):
+            return "hello@ at a company that isn't a small startup"
+        return ""
+
+
+def batch_rules(cfg: dict) -> BatchRules:
+    g = cfg.get("type_gates") or {}
+    cap = g.get("general_inbox_max_team")
+    return BatchRules(bool(cfg.get("require_written_draft")), None if cap in (None, "") else int(cap))
+
+
+def send_records(store) -> list[SendRecord]:
+    """Every send with its contact kind (recorded at mark-sent since 2f; earlier sends are classified from the
+    stored contact, tier 3 counting as a guess) and the date it bounced, if it did."""
+    contacts = {r["email"]: r for r in store.conn.execute("SELECT * FROM contacts")}
+    events = store.events()
+    bounced = {}
+    for e in events:
+        if e["event"] == "bounced":
+            bounced.setdefault((e["target_id"], e["email"]), e["event_date"])
+    out = []
+    for e in events:
+        if e["event"] != "sent":
+            continue
+        kind = e["kind"] if "kind" in e.keys() and e["kind"] else ""
+        if not kind:
+            c = contacts.get(e["email"])
+            conf = "guessed" if e["send_tier"] == 3 else (c["confidence"] if c else "published_inbox")
+            kind = contact_kind(e["email"], conf, evidence=(c["evidence"] if c is not None and "evidence" in c.keys()
+                                                             else None))
+            if kind == "other" and c is not None and c["name"] and role_group(c["role"] or "") in HIRING_PEOPLE:
+                kind = "verified_person"          # a named hiring person sent before 2f
+            if kind == "other":
+                kind = classify_published(e["email"])[0]
+        out.append(SendRecord(e["event_date"], kind, bounced.get((e["target_id"], e["email"]), "")))
+    return out
+
+
 def pick_batch(items: list[OutreachItem], day: date, size: int, history: dict, tier3_cfg: dict,
-               already: list[OutreachItem] | None = None, general_cap: int | None = None) -> Batch:
-    """The day's emails: ready targets in priority order (tier 1, 2, then 3 within the gate), one per company,
-    at most `general_cap` to hello@ / hi@ / team@ (2e)."""
+               already: list[OutreachItem] | None = None, general_cap: int | None = None,
+               gates: dict[str, TypeGate] | None = None) -> Batch:
+    """The day's emails: ready targets in priority order, one per company. With `gates` (2f) each contact kind
+    is held to its own gate (type_gates); without, the 2e rules: tier 1, 2, then 3 within the tier-3 gate, at
+    most `general_cap` to hello@ / hi@ / team@."""
     already = already or []
     general = sum(1 for it in already if it.address and it.address.kind == "general_inbox")
     gate = tier3_gate(history, day, tier3_cfg)
-    batch = Batch(day=day.isoformat(), items=list(already), gate=gate, first_sent=history.get("first_sent"))
+    batch = Batch(day=day.isoformat(), items=list(already), gate=gate, first_sent=history.get("first_sent"),
+                  gates=gates or {})
     seen = {it.company_id for it in already}
     taken = {it.target_id for it in already}
     tier3 = sum(it.send_tier == 3 for it in already)
+    per_kind: dict[str, int] = {}
+    for it in already:
+        if it.address:
+            per_kind[it.address.kind] = per_kind.get(it.address.kind, 0) + 1
     for it in items:
         if len(batch.items) >= size:
             break
@@ -659,6 +875,23 @@ def pick_batch(items: list[OutreachItem], day: date, size: int, history: dict, t
             continue
         if it.company_id in seen:
             batch.skipped_same_company += 1
+            continue
+        if gates is not None:
+            kind = it.address.kind if it.address else "other"
+            g = gates.get(kind) or gates["other"]
+            rules = gates.get("_rules")
+            why = rules.holds(it) if rules is not None else ""
+            if why:                            # 2f: no validated Claude draft, or hello@ at a company that isn't small
+                batch.held_by_kind[why] = batch.held_by_kind.get(why, 0) + 1
+                continue
+            if g.limit is not None and per_kind.get(kind, 0) >= g.limit:
+                batch.held_by_kind[kind] = batch.held_by_kind.get(kind, 0) + 1
+                batch.general_held += kind == "general_inbox"
+                batch.tier3_held += it.send_tier == 3
+                continue
+            per_kind[kind] = per_kind.get(kind, 0) + 1
+            seen.add(it.company_id)
+            batch.items.append(it)
             continue
         if general_cap is not None and it.address and it.address.kind == "general_inbox":
             if general >= general_cap:
@@ -689,10 +922,94 @@ def mark_queued(store, items: list[OutreachItem]) -> None:
             it.queued_on = row[1]
 
 
+# ---------------------------------------------------------------------------
+# Phase 2f: pre-send freshness check
+# ---------------------------------------------------------------------------
+
+FRESH_KINDS = ("hiring_inbox", "general_inbox", "evidence_guess", "verified_person", "founders")
+
+
+@dataclass
+class FreshCheck:
+    target_id: str
+    email: str
+    url: str
+    status: str                    # ok | gone (dropped) | unchecked (kept: the page couldn't be read now)
+    note: str = ""
+
+
+class Freshness:
+    """2f: before a batch is built, re-fetch the page each picked address was found on (polite client, robots.txt)
+    and drop the address if it's no longer there - for hiring inboxes, hello@, founders@, named people and the
+    evidence behind a guess (the published same-format address, and the person's name on their page). A dropped
+    address goes to excluded_contacts with the reason, so it's never queued again. A page that answers 404 / 410
+    counts as gone; any other failure (network, robots.txt now disallowing it) keeps the address, marked unchecked.
+    Posting, manual and GitHub addresses have no page to re-check. Pages are fetched once per run."""
+
+    def __init__(self, client, store, day: date, log: Log = lambda _: None):
+        self.client, self.store, self.day, self.log = client, store, day, log
+        self.pages: dict[str, str | None | Exception] = {}
+        self.checks: list[FreshCheck] = []
+
+    def _page(self, url: str):
+        if url not in self.pages:
+            try:
+                self.pages[url] = self.client.get_page(url)
+            except FetchError as exc:
+                self.pages[url] = exc
+        return self.pages[url]
+
+    def _has(self, url: str, needle: str, is_email: bool = True):
+        """True / False, or None when the page couldn't be read (except 404 / 410: gone, so False)."""
+        page = self._page(url)
+        if isinstance(page, FetchError):
+            return False if page.status in (404, 410) else None
+        if is_email:
+            from applyflow.contacts import page_has_email
+            return page_has_email(page, needle)
+        from applyflow.text import html_to_text
+        name = needle.lower()                 # a YC page carries founders in its embedded JSON, not its text
+        return name in " ".join(html_to_text(page).split()).lower() or name in htmllib.unescape(page).lower()
+
+    def check(self, it: "OutreachItem") -> bool:
+        """Is the item's address still where it was found? False = dropped (and recorded)."""
+        a = it.address
+        if a is None or a.kind not in FRESH_KINDS or a.source not in ("website", "pattern", "yc"):
+            return True
+        if a.kind == "evidence_guess":
+            ev = a.evidence or {}
+            probes = [(ev.get("published_url") or "", ev.get("published") or "", True),
+                      (ev.get("person_url") or a.source_url, a.name, False)]
+        else:
+            probes = [(a.source_url, a.email, True)]
+        unread = []
+        for url, needle, is_email in probes:
+            if not url or not needle:
+                continue
+            found = self._has(url, needle, is_email)
+            what = needle if is_email else f"{needle}'s name"
+            if found is None:
+                unread.append(url)
+                continue
+            if not found:
+                why = f"2f freshness check {self.day.isoformat()}: {what} no longer on {url}"
+                self.store.exclude_contact(a.email, why)
+                self.checks.append(FreshCheck(it.target_id, a.email, url, "gone", why))
+                self.log(f"  dropped {a.email}: {why}")
+                return False
+        if unread:
+            self.checks.append(FreshCheck(it.target_id, a.email, unread[0], "unchecked",
+                                          f"couldn't read {unread[0]} now ({self.pages[unread[0]]}); kept"))
+            return True
+        self.checks.append(FreshCheck(it.target_id, a.email, probes[0][0], "ok"))
+        return True
+
+
 def make_queue(store, profile: Profile, day: date, size: int | None = None, dnc: DoNotContact | None = None,
-               save: bool = True) -> Batch:
+               save: bool = True, fresh: Freshness | None = None) -> Batch:
     """Pick (and store) a day's batch. Entries of that day already marked sent stay in it; targets waiting in
-    an earlier day's stored batch are left for that day."""
+    an earlier day's stored batch are left for that day. With `fresh` (2f), every picked address is re-checked on
+    its source page first; a dropped one is replaced by the next pick, until the batch is stable."""
     items = refresh_drafts(store, profile, dnc) if save else build_items(store, profile, dnc, day=day)
     mark_queued(store, items)
     size = int(size or profile.outreach["daily_batch"])
@@ -700,8 +1017,25 @@ def make_queue(store, profile: Profile, day: date, size: int | None = None, dnc:
     sent_today = [by_id[r["target_id"]] for r in store.queue(day.isoformat())
                   if r["target_id"] in by_id and by_id[r["target_id"]].status == "sent"
                   and by_id[r["target_id"]].sent_date == day.isoformat()]
-    batch = pick_batch(items, day, size, store.send_history(day.isoformat()), profile.outreach["tier3"], sent_today,
-                       general_cap=_general_cap(profile))
+    gates = type_gates(send_records(store), day, profile.outreach)
+    gates["_rules"] = batch_rules(profile.outreach)
+    checked: set[str] = set()
+    while True:
+        batch = pick_batch(items, day, size, store.send_history(day.isoformat()), profile.outreach["tier3"],
+                           sent_today, general_cap=_general_cap(profile), gates=gates)
+        if fresh is None:
+            break
+        stale = [it for it in batch.items if it.status == "ready" and it.target_id not in checked
+                 and not fresh.check(it)]
+        checked |= {it.target_id for it in batch.items}
+        if not stale:
+            break
+        items = refresh_drafts(store, profile, dnc) if save else build_items(store, profile, dnc, day=day)
+        mark_queued(store, items)
+        by_id = {it.target_id: it for it in items}
+        sent_today = [by_id[t.target_id] for t in sent_today if t.target_id in by_id]
+        checked -= {it.target_id for it in stale}
+    batch.fresh = fresh.checks if fresh is not None else []
     if save:
         store.save_queue(day.isoformat(), [(it.target_id, it.address.email, it.send_tier)
                                            for it in batch.items if it.status == "ready"],
@@ -716,7 +1050,8 @@ def stored_or_preview_batch(store, profile: Profile, items: list[OutreachItem],
     rows = store.queue(day.isoformat())
     mark_queued(store, items)
     batch = pick_batch(items, day, int(profile.outreach["daily_batch"]), store.send_history(day.isoformat()),
-                       profile.outreach["tier3"], general_cap=_general_cap(profile))
+                       profile.outreach["tier3"], general_cap=_general_cap(profile),
+                       gates=type_gates(send_records(store), day, profile.outreach))
     if rows:
         return [by_id[r["target_id"]] for r in rows if r["target_id"] in by_id], True, batch.gate
     return batch.items, False, batch.gate
@@ -746,7 +1081,7 @@ def mark_sent(store, profile: Profile, tid: str, day: date, dnc: DoNotContact | 
         raise OutreachError(f"{it.target_id} isn't ready to send ({STATUS_LABELS.get(it.status, it.status)})")
     queued = {r["target_id"]: r["email"] for r in store.queue(day.isoformat())}
     store.add_event(it.target_id, it.company_key, queued.get(it.target_id, it.address.email), "sent",
-                    day.isoformat(), day.isoformat() if it.target_id in queued else "", it.send_tier)
+                    day.isoformat(), day.isoformat() if it.target_id in queued else "", it.send_tier, it.address.kind)
     refresh_drafts(store, profile, dnc)
     return it
 
@@ -761,8 +1096,9 @@ def mark_batch_sent(store, profile: Profile, batch_day: date, dnc: DoNotContact 
         it = items.get(r["target_id"])
         if it is None or it.status != "ready":
             continue
+        kind = it.address.kind if it.address and it.address.email == r["email"] else ""
         store.add_event(it.target_id, it.company_key, r["email"], "sent", batch_day.isoformat(), batch_day.isoformat(),
-                        r["send_tier"])
+                        r["send_tier"], kind)
         marked.append(f"{it.target_id} -> {r['email']}")
     refresh_drafts(store, profile, dnc)
     return marked
@@ -801,6 +1137,10 @@ def add_target(store, profile: Profile, client, company: str, website: str, note
         store.save_role_match(key, "manual", "yes", title=role_seen, note="the role you saw (import-targets)")
     row = store.get_manual_target(key)
     target = manual_target(row, profile)
+    large = large_company_reason(store, profile, target.domain, note)
+    if large:                              # 2f: hiring inbox only
+        target.hint = APPLY_ONLY_HINT
+        log(f"  {company}: large company ({large}): hiring inbox only")
     if email:
         blocked = dnc.blocks(email)
         if blocked:
@@ -820,6 +1160,22 @@ def add_target(store, profile: Profile, client, company: str, website: str, note
     if out_dir is not None:
         write_packets(items, profile, out_dir, only={it.target_id})
     return it
+
+
+def large_company_reason(store, profile: Profile, domain: str, note: str = "") -> str:
+    """2f: why a company counts as large (over 300 people: hiring inbox only), from your note ("large") or its pool
+    record (team size, or a late / big round with no headcount); '' otherwise."""
+    if re.search(r"\blarge\b", note or "", re.I):
+        return "your note says large"
+    row = store.pool_by_domain().get(domain) if domain else None
+    if row is None:
+        return ""
+    from applyflow.pool import large_reason
+    from applyflow.sources import PoolCompany
+    c = PoolCompany.from_json(json.loads(row["data"]))
+    if c.team_size is not None and c.team_size > int(profile.contacts["apply_only_team_size"]):
+        return f"{c.team_size} people"
+    return large_reason(c, profile)
 
 
 def _stub(key: str, company: str, website: str) -> OutreachItem:

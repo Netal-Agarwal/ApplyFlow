@@ -658,6 +658,9 @@ def careers_page_roles(text: str, profile: Profile) -> tuple[list[str], int]:
     for line in (ln.strip() for ln in (text or "").splitlines()):
         if not _ROLE_LINE.match(line) or len(line.split()) > 9:
             continue
+        # 2f: "Developer careers", "Hire Data Engineer" (a hire-us page) and stacks I don't have aren't openings.
+        if re.search(r"\bcareers?\b|\bhire\b|\bhiring\b|\bror\b|\brails\b|\bgolang\b|\.net\b", line, re.I):
+            continue
         probe = Job(source="careers", external_id="", company="", title=line, url="")
         if not re.search(r"\b(engineer|developer|intern|sde|programmer|scientist|architect|analyst|designer|"
                          r"manager|lead|executive|associate)\b", line, re.I):

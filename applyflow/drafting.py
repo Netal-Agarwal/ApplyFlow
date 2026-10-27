@@ -10,6 +10,10 @@ The middle section (2d format): the two projects that best match the company, on
 the credentials line (internship + patent), and a skills line ("Day to day I work in ...") of 4-7
 skills from the facts. Drafts already queued or sent before 2d keep their own rules (`LEGACY_RULES`).
 
+Phase 2f: a project whose dates end in "Present" (CareerForge AI, Judicial AI System) is described as ongoing
+("I'm currently building ..."), never "I built ..." (`ongoing_failures`); drafts queued or sent before 2f keep
+their wording (rule set "2e").
+
 Every target gets a template draft that reads naturally even with almost no company
 information. `draft-pack` writes a packet per target (every input plus a style guide); a
 draft written from it (output/drafts/written/<id>.md) replaces the template once it passes
@@ -28,8 +32,10 @@ from applyflow.config import Profile
 from applyflow.text import contains_phrase
 
 SIGN_OFF = "Best regards,"
-# Rule sets: "2b" (scheduled before Phase 2c), "2c" (queued or sent before the 2d format), "2d" (current).
+# Rule sets: "2b" (scheduled before Phase 2c), "2c" (queued or sent before the 2d format), "2e" (queued or sent
+# before 2f: the 2d format without the ongoing-project rule), "2f" (current).
 LEGACY_RULES = {"2b", "2c"}
+PRE_2F_RULES = LEGACY_RULES | {"2e"}
 LEGACY_WORDS = (120, 160)
 MIN_SKILLS, MAX_SKILLS = 4, 7
 _SKILLS_LINE = re.compile(r"\bday[- ]to[- ]day,?\s+I\s+work\s+(?:in|with)\s+((?:[^.!?\n]|\.(?=\w))+)", re.I)   # "Node.js" isn't a full stop
@@ -110,10 +116,16 @@ class Project:
     detail: str = ""
     keywords: list[str] = field(default_factory=list)
     short: str = ""                  # one-sentence detail for the two-project middle section (2d)
+    when: str = ""                   # "Jun 2026 - Present"
 
     @property
     def summary(self) -> str:
         return self.short or self.detail
+
+    @property
+    def ongoing(self) -> bool:
+        """2f: still being built (its dates end in 'Present'): written as ongoing, never 'I built'."""
+        return bool(re.search(r"\bpresent\s*$", self.when or "", re.I))
 
 
 @dataclass
@@ -219,7 +231,7 @@ def load_facts(profile: Profile) -> Facts:
         focus=str(raw.get("focus") or ""), skills=[str(s) for s in raw.get("skills") or []],
         projects=[Project(name=str(p.get("name") or ""), stack=str(p.get("stack") or ""),
                           detail=str(p.get("detail") or ""), keywords=[str(k).lower() for k in p.get("keywords") or []],
-                          short=str(p.get("short") or ""))
+                          short=str(p.get("short") or ""), when=str(p.get("when") or ""))
                   for p in raw.get("projects") or [] if p.get("name")],
         experience=[{k: str(v) for k, v in e.items()} for e in raw.get("experience") or []],
         patent={k: str(v or "") for k, v in (raw.get("patent") or {}).items()},
@@ -268,9 +280,10 @@ class DraftInputs:
     locations: str = ""
     note: str = ""                  # add-target --note
     remote_global: bool = False
-    rules: str = "2d"               # "2b" / "2c": queued or sent under an older rule set (LEGACY_RULES)
+    rules: str = "2f"               # "2b" / "2c" / "2e": queued or sent under an older rule set (PRE_2F_RULES)
     funding: dict[str, str] = field(default_factory=dict)   # sourced round: round, amount, date, source_url
     hl_score: int | None = None     # hiring likelihood (pool), for packets
+    sector: str = ""                # 2f: fintech | consultancy | startup | other
 
     @property
     def first_name(self) -> str:
@@ -612,9 +625,8 @@ def template_draft(inputs: DraftInputs, facts: Facts, min_words: int = 160, max_
         line = funding_line(inputs)
         if line:
             s.append(_Sentence(0, line, "preferred", 2))
-    leads = ["The closest match from my work is" if inputs.kind == "role" else "Most recently I built",
-             "I also built"]
-    for i, (lead, p) in enumerate(zip(leads, projects)):
+    for i, p in enumerate(projects):
+        lead = project_lead(p, i, inputs.kind == "role")
         s.append(_Sentence(1, f"{lead} {p.name}, {p.summary}.", order=1 + i,
                            short=f"{lead} {p.name} ({p.stack})." if p.stack else ""))
     credentials = facts.credentials()
@@ -643,6 +655,37 @@ def template_draft(inputs: DraftInputs, facts: Facts, min_words: int = 160, max_
                   skills=skills, skills_reason=" | ".join(skill_reasons))
     draft.template_failures = validate(draft.subject, body, inputs, facts, action, min_words, max_words, terms or [])
     return draft
+
+
+def project_lead(p: Project, i: int, role: bool = False) -> str:
+    """How the template introduces its i-th project: ongoing ones as ongoing work (2f)."""
+    if i == 0 and role:
+        return "The closest match from my work is"
+    if p.ongoing:
+        return "Right now I'm building" if i == 0 else "I'm also building"
+    return "Most recently I built" if i == 0 else "I also built"
+
+
+# 2f: a past-tense claim to have finished something ("I built X", "I've developed X").
+_DONE_VERB = re.compile(r"\bI(?:'ve| have)?\s+(?:also\s+|recently\s+|already\s+)?(?:built|developed|created|designed|"
+                        r"shipped|made|wrote|implemented|completed|finished|launched)\b", re.I)
+
+
+def ongoing_failures(message: str, facts: Facts) -> list[str]:
+    """2f: a sentence naming an ongoing project (dates ending in 'Present') must not say it was built / finished.
+    A sentence that also names a finished project is left alone (the verb may be about that one)."""
+    ongoing = [p for p in facts.projects if p.ongoing]
+    done = [p for p in facts.projects if not p.ongoing]
+    out = []
+    for sent in re.split(r"(?<=[.!?])\s+|\n+", message):
+        named = [p.name for p in ongoing if contains_phrase(sent, p.name)]
+        if not named or any(contains_phrase(sent, p.name) for p in done):
+            continue
+        m = _DONE_VERB.search(sent)
+        if m:
+            out.append(f"'{m.group(0)} ... {named[0]}': {named[0]} is ongoing (its dates end in 'Present'); "
+                       f"describe it as ongoing ('I'm currently building ...', 'I'm working on ...')")
+    return out
 
 
 def _template_subject(inputs: DraftInputs, facts: Facts) -> str:
@@ -861,6 +904,8 @@ def validate(subject: str, body: str, inputs: DraftInputs, facts: Facts, action:
     missing = [label for label, word in facts.credential_marks() if word.lower() not in low]
     if missing:
         failures.append(f"no credentials line (mention the {' and the '.join(missing)})")
+    if inputs.rules not in PRE_2F_RULES:
+        failures += ongoing_failures(message, facts)
     if not inputs.legacy:
         failures += middle_failures(message, facts)
         repeated = restated_roles(message)
@@ -990,7 +1035,8 @@ post, page or an unambiguous handle), "Hi," for a person's address whose name is
 2. Two projects: the two from the facts that best match the company (the packet suggests them, by role
    family, the posting's stack or the company's context). One sentence each, with one or two concrete
    details (stack, scale, numbers). Use the project names exactly as the facts write them, and name no
-   third project.
+   third project. A project whose dates end in "Present" (CareerForge AI, Judicial AI System) is ongoing:
+   "I'm currently building ...", "I'm working on ..." - never "I built ..." (2f, validated).
 3. The credentials line, right after the projects: one short sentence with the DRDO internship and the
    published patent, e.g. "Before this, I interned at DRDO's DEAL lab and co-invented a published patent
    on Android attention management." Vary the wording from email to email.
@@ -1059,6 +1105,11 @@ def render_packet(inputs: DraftInputs, draft: Draft, facts: Facts, meta: dict[st
         lines.append(f"- No address yet ({meta.get('status', '')}); write it for `{inputs.greeting}`.")
     for b in meta.get("backups", []):
         lines.append(f"- If it bounces: {b}")
+    if inputs.sector:
+        lines.append(f"- Sector (2f): {inputs.sector}" + {
+            "fintech": " - connect the work to reliability, transactions, security or APIs",
+            "consultancy": " - connect the work to shipping production software for clients across stacks"}.get(
+            inputs.sector, ""))
     lines += ["", "## Company context", "",
               f"- Website: {inputs.website or '-'}",
               f"- One-liner: {inputs.one_liner or '-'}",

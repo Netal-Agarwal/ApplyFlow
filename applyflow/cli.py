@@ -28,6 +28,10 @@
     python -m applyflow role-check       # 2e: a role match (board / careers page) for targets without one
     python -m applyflow contacts --deep  # 2e: more pages for targets with no safe contact
     python -m applyflow safe-contacts    # 2e: unsent safe contacts by kind, and sending days covered
+    python -m applyflow supply --all     # 2f: fintech lists, consultancies, GitHub lists, YC fintech -> the pool
+    python -m applyflow guess-evidence   # 2f: which stored guesses are backed by evidence (offline)
+    python -m applyflow classify-published [--apply]   # 2f: "other" published addresses: hiring or not
+    python -m applyflow referrals        # 2f: output/referrals.csv for large / apply-only companies
 
 ApplyFlow never sends email: you send from Gmail and record it here.
 """
@@ -112,8 +116,12 @@ def cmd_report(args, profile, store) -> int:
     if items:
         day = parse_day(getattr(args, "date", None))
         batch, stored, gate = stored_or_preview_batch(store, profile, items, day)
+        from applyflow.outreach import send_records, type_gates
+        gates = type_gates(send_records(store), day, profile.outreach)
         outreach = outreach_sections(items, batch, day.isoformat(), stored, load_facts(profile).listing(),
-                                     f"Tier 3 (guessed addresses) {gate.reason}.")
+                                     "Per-type gate (2f): " + "; ".join(
+                                         f"{k.replace('_', ' ')} {g.reason}" for k, g in gates.items()
+                                         if k in ("evidence_guess", "general_inbox", "hiring_inbox")) + ".")
         outbox = write_outbox_csv(items, {it.target_id for it in batch}, out / "outbox.csv")
     html_path = write_html(rows, out / "opportunities.html", store.stats(), contacts, outreach)
     csv_path = write_csv(rows, out / "opportunities.csv")
@@ -165,6 +173,7 @@ def cmd_contacts(args, profile, store) -> int:
     github = GitHubBudget()
     mx = MXChecker(client, store, int(profile.contacts["mx_cache_days"]))
     days = int(profile.contacts["recheck_days"])
+    names = store.known_first_names()          # 2f: evidence for guesses (a published 'rahul@' shows first@)
     roles = sum(t.kind == "role" for t in targets)
     from applyflow.contacts import pending_targets
     if args.deep:
@@ -173,6 +182,11 @@ def cmd_contacts(args, profile, store) -> int:
               f"or an unrecognised address); this batch {len(batch)}.")
     else:
         batch, pending = pending_targets(store, targets, days, args.force, args.limit, args.retry_unread)
+    if args.shard:                             # 2f: "i/n" - run n lookups side by side on disjoint targets
+        import zlib
+        i, n = (int(x) for x in args.shard.split("/"))
+        batch = [t for t in batch if zlib.crc32(t.key.encode()) % n == i]
+        pending = [t for t in pending if zlib.crc32(t.key.encode()) % n == i]
     skipped = len(targets) - len(pending)
     recent = "" if args.force else f"; {skipped} checked in the last {days} days are skipped"
     print(f"Finding contacts for {len(targets)} targets ({roles} with A/B roles, {len(targets) - roles} general "
@@ -188,7 +202,7 @@ def cmd_contacts(args, profile, store) -> int:
         if manual is not None and manual["email"]:
             store.save_contact_result(manual_result(target, manual))     # given by hand: no lookup
             continue
-        result = find_contacts(client, target, profile, dnc, github, log=print, mx=mx, deep=args.deep)
+        result = find_contacts(client, target, profile, dnc, github, log=print, mx=mx, deep=args.deep, names=names)
         if args.deep and any(r.startswith("website (deep): read 0 page(s)") for r in result.reasons) \
                 and store.contacts_for(target.key):
             print(f"    kept the stored contacts: the site couldn't be read now")
@@ -220,6 +234,9 @@ def deep_targets(store, profile, targets, limit: int = 0):
     pending = []
     for t in targets:
         it = items.get(t.key)
+        if it is None and t.domain and t.key not in deep_done:
+            pending.append(t)                  # 2f: a new target, never looked up: the deep search is its first
+            continue
         if it is None or it.protected or t.key in deep_done or not t.domain:
             continue
         if it.status in ("no_contact", "unsendable") or (it.status == "ready" and it.address is not None
@@ -345,14 +362,108 @@ def cmd_role_check(args, profile, store) -> int:
     from applyflow.outreach import build_items
     from applyflow.refill import check_roles
     have = store.role_matches()
+    since = {r[0] for r in store.conn.execute("SELECT company_key FROM contact_checks WHERE checked_at >= ?",
+                                              (args.checked_since,))} if args.checked_since else None
     keys = [it.company_key for it in build_items(store, profile, _dnc())
-            if it.status == "ready" and not it.protected and it.company_key not in have
-            and (it.company_key.startswith(("pool:", "manual:")) or args.all)]
+            if it.status in ("ready", "apply_only") and not it.protected and it.company_key not in have
+            and (it.company_key.startswith(("pool:", "manual:")) or args.all or since is not None)
+            and (since is None or it.company_key in since)]
     if args.limit:
         keys = keys[:args.limit]
     print(f"Checking {len(keys)} target(s) for an open role that fits (ATS board, else careers page)...")
     counts = check_roles(store, _client(profile, args.min_interval), profile, keys, log=print)
     print("Role matches: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+    return 0
+
+
+def cmd_supply(args, profile, store) -> int:
+    """2f: fintech lists, product-engineering consultancies, GitHub lists and India-friendly YC fintechs -> the
+    stored pool (verified on their own sites), then the selection is redone offline."""
+    from applyflow.contacts import MXChecker
+    from applyflow.outreach import parse_day
+    from applyflow.sources import PoolCompany, collect_list
+    from applyflow import supply
+    day = parse_day(args.date)
+    if args.target_size:
+        profile.pool["target_size"] = args.target_size
+    client = _client(profile, args.min_interval)
+    mx = MXChecker(client, store, int(profile.contacts["mx_cache_days"]))
+    sources = config.load_sources()
+    found: list[PoolCompany] = []
+    report: list[str] = []
+    want = lambda flag: args.all or getattr(args, flag)
+    if want("fintech"):
+        from applyflow.refill import resolve_domain
+        resolve = lambda name: resolve_domain(client, mx, name, "fintech payments lending")[0]
+        for cfg in sources.get("fintech_lists") or []:
+            print(f"{cfg.get('label', cfg['id'])}...")
+            got, stats = supply.collect_fintech(client, mx, cfg, profile, log=print, resolve=resolve)
+            found += got
+            report.append(f"fintech:{cfg['id']}: {stats.get('note', '')}; dropped {len(stats.get('dropped', []))}")
+    if want("consultancies"):
+        seeds = sources.get("consultancies") or []
+        print(f"Consultancy seeds ({len(seeds)})...")
+        got, stats = supply.collect_consultancies(client, mx, seeds, profile, log=print)
+        found += got
+        report.append(f"consultancy:seed: {stats['note']}")
+        for d in stats["dropped"]:
+            print(f"  dropped {d}")
+    if want("lists"):
+        for cfg in sources.get("github_lists") or []:
+            got, note = collect_list(client, cfg, print)
+            found += got
+            report.append(f"list:{cfg['id']}: {note}")
+    if want("yc_fintech"):
+        rows = [PoolCompany.from_json(json.loads(r["data"])) for r in store.pool_rows()]
+        cands = [c for c in rows if c.region != "india" and "yc" in c.sources and not c.india_friendly
+                 and (c.sector or supply.pool_sector(c)) == "fintech"]
+        print(f"Remote YC fintechs: checking {len(cands)} jobs pages for a posting open to India...")
+        friendly = 0
+        for c in cands:
+            why = supply.india_friendly(client, profile, c)
+            if why:
+                c.india_friendly, c.sector = why, "fintech"
+                found.append(c)
+                friendly += 1
+                print(f"  {c.name:<28} {why}")
+        report.append(f"yc fintech (remote): {len(cands)} checked, {friendly} India-friendly")
+    scored, changes, new = supply.extend_pool(store, profile, found, day, log=print)
+    added = [c for c in changes if c.now.selected and not c.was_selected]
+    print("\n".join(report))
+    print(f"Newly selected: {len(added)}")
+    for c in added:
+        print(f"  + {c.company.name:<30} {c.company.sector or '-':<12} {c.now.why_selected}")
+    print("Next: `contacts --deep --limit 50` (new targets), `role-check --checked-since <today>`, `draft-pack`.")
+    return 0
+
+
+def cmd_guess_evidence(args, profile, store) -> int:
+    from applyflow.supply import backfill_evidence
+    counts = backfill_evidence(store, log=print)
+    print(f"{counts['guesses']} stored guesses of unprotected targets checked; {counts['evidence']} backed by evidence "
+          f"({counts['moved']} moved to the address format the evidence shows). The rest stay pure pattern guesses "
+          "(never sent).")
+    return 0
+
+
+def cmd_classify_published(args, profile, store) -> int:
+    from applyflow.outreach import build_items
+    from applyflow.supply import classify_other_addresses
+    rows = classify_other_addresses(store, build_items(store, profile, _dnc()), apply=args.apply)
+    for r in rows:
+        print(f"  {r.company:<26} {r.email:<36} {r.kind:<13} {r.reason}")
+    n = sum(r.kind != "unsendable" for r in rows)
+    print(f"{len(rows)} 'other' published address(es): {n} sendable, {len(rows) - n} unsendable"
+          + (" (recorded in excluded_contacts)" if args.apply else " (dry run: --apply records the unsendable ones)"))
+    return 0
+
+
+def cmd_referrals(args, profile, store) -> int:
+    from applyflow.outreach import build_items
+    from applyflow.supply import referral_rows, write_referrals
+    rows = referral_rows(store, profile, build_items(store, profile, _dnc()))
+    path = write_referrals(rows, Path(args.out) / "referrals.csv")
+    print(f"{len(rows)} referral row(s) written to {path} (send the LinkedIn notes yourself).")
     return 0
 
 
@@ -374,6 +485,12 @@ def cmd_safe_contacts(args, profile, store) -> int:
     for it in items:
         statuses[it.status] = statuses.get(it.status, 0) + 1
     print("All targets by status: " + ", ".join(f"{k}={v}" for k, v in sorted(statuses.items())))
+    from applyflow.supply import supply_summary
+    t = supply_summary(items, profile.outreach, int(profile.outreach["daily_batch"]))
+    print(f"2f sendable (not in a stored batch): {t['sendable']}; by sector: "
+          + ", ".join(f"{k or '-'}={v}" for k, v in sorted(t["by_sector"].items()))
+          + f". At {profile.outreach['daily_batch']}/day with the 2f caps: {t['days']} day(s), "
+            f"{t['full_days']} of them full.")
     return 0
 
 
@@ -481,16 +598,33 @@ def cmd_queue(args, profile, store) -> int:
     except OutreachError as exc:
         print(f"error: {exc}")
         return 2
-    batch = make_queue(store, profile, day, args.size, _dnc())
+    from applyflow.outreach import Freshness
+    fresh = None if args.no_fresh else Freshness(_client(profile, args.min_interval), store, day, log=print)
+    if fresh is not None:
+        print("Freshness check (2f): re-reading each picked address's source page...")
+    batch = make_queue(store, profile, day, args.size, _dnc(), fresh=fresh)
     print(f"Batch for {batch.day}: {len(batch.items)} email(s)")
     for i, it in enumerate(batch.items, start=1):
         a = it.address
         who = f"{a.name} ({a.role})" if a and a.name else (a.role if a else "")
         state = f"  [sent {it.sent_date}]" if it.status == "sent" else ""
         print(f"  {i:>2}. T{it.send_tier} {it.company:<24} {(it.sent_email or a.email):<34} {who}{state}")
-    tier3 = sum(it.send_tier == 3 for it in batch.items)
-    print(f"Tier 3 (guessed addresses) {batch.gate.reason}.")
-    print(f"  {tier3} in this batch, {batch.tier3_held} held back.")
+    from applyflow.outreach import KIND_LABELS
+    print("By contact type (2f per-type gate):")
+    for why, n in batch.held_by_kind.items():
+        if why not in batch.gates:
+            print(f"  held: {n} - {why}")
+    for kind, g in batch.gates.items():
+        if kind.startswith("_"):
+            continue
+        n = sum(1 for it in batch.items if it.address and it.address.kind == kind)
+        held = batch.held_by_kind.get(kind, 0)
+        if n or held or g.state == "paused":
+            print(f"  {KIND_LABELS.get(kind, kind):<44} {n:>2} in batch, {held:>3} held - {g.reason}")
+    if fresh is not None:
+        counts = {s: sum(c.status == s for c in batch.fresh) for s in ("ok", "gone", "unchecked")}
+        print(f"Freshness: {counts['ok']} still on their page, {counts['gone']} dropped (excluded_contacts), "
+              f"{counts['unchecked']} kept unchecked (page unreadable now).")
     if batch.held_earlier:
         print(f"{batch.held_earlier} ready target(s) left out: already in an earlier day's stored queue, not yet "
               "marked sent.")
@@ -713,7 +847,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="also redo lookups that read no page of the site (network drop, failing site)")
     p.add_argument("--deep", action="store_true",
                    help="2e: read more pages (team, about-us, careers, jobs, join, contact, privacy, terms, footer "
-                        "links) for targets with no safe contact")
+                        "links) for targets with no safe contact (2f: and new targets never looked up)")
+    p.add_argument("--shard", help="2f: i/n - only targets whose key hashes to i of n (parallel runs)")
     p.add_argument("--out", default=str(config.OUTPUT_DIR))
     p.set_defaults(func=cmd_contacts)
 
@@ -751,6 +886,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("queue", help="pick a day's send batch (nothing is sent)")
     p.add_argument("--date", help="YYYY-MM-DD (default today)")
     p.add_argument("--size", type=int, help="batch size (default outreach.daily_batch)")
+    p.add_argument("--no-fresh", action="store_true",
+                   help="2f: skip the pre-send freshness check (re-reading each address's source page)")
     p.set_defaults(func=cmd_queue)
 
     p = sub.add_parser("mark-sent", help="record an email you sent")
@@ -792,11 +929,32 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("role-check", help="2e: look for an open role that fits at targets without a role match")
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--all", action="store_true", help="every ready target, not only pool / manual ones")
+    p.add_argument("--checked-since", help="2f: only targets looked up on or after this day (YYYY-MM-DD)")
     p.set_defaults(func=cmd_role_check)
 
     p = sub.add_parser("safe-contacts", help="2e: unsent safe contacts by kind and the sending days they cover")
     p.add_argument("--guessed-per-day", type=int, default=7)
     p.set_defaults(func=cmd_safe_contacts)
+
+    p = sub.add_parser("supply", help="2f: fintech lists, consultancies, GitHub lists, YC fintech -> the pool")
+    p.add_argument("--all", action="store_true", help="every 2f source")
+    p.add_argument("--fintech", action="store_true", help="fintech_lists in sources.yaml (RBI, Sahamati)")
+    p.add_argument("--consultancies", action="store_true", help="the consultancy seed list in sources.yaml")
+    p.add_argument("--lists", action="store_true", help="refresh the GitHub lists in sources.yaml")
+    p.add_argument("--yc-fintech", dest="yc_fintech", action="store_true",
+                   help="remote YC fintechs with a posting open to India")
+    p.add_argument("--date", help="as of this day (YYYY-MM-DD, default today)")
+    p.add_argument("--target-size", type=int, default=0, help="targets to select this run (default pool.target_size)")
+    p.set_defaults(func=cmd_supply)
+
+    sub.add_parser("guess-evidence", help="2f: mark stored guesses that evidence backs (offline)"
+                   ).set_defaults(func=cmd_guess_evidence)
+    p = sub.add_parser("classify-published", help="2f: classify 'other' published addresses (hiring or not)")
+    p.add_argument("--apply", action="store_true", help="record the unsendable ones in excluded_contacts")
+    p.set_defaults(func=cmd_classify_published)
+    p = sub.add_parser("referrals", help="2f: output/referrals.csv for large / apply-only companies with a fit role")
+    p.add_argument("--out", default=str(config.OUTPUT_DIR))
+    p.set_defaults(func=cmd_referrals)
 
     p = sub.add_parser("discover", help="find hiring startups and their job boards automatically")
     p.add_argument("--limit", type=int, default=40, help="companies to check this run (default 40)")
@@ -805,6 +963,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # 2f: a company name the Windows console can't encode (cp1252) killed a long `contacts` run mid-way.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     args = build_parser().parse_args(argv)
     try:
         profile = config.load_profile(Path(args.profile) if args.profile else None)

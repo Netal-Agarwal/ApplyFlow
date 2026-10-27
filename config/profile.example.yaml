@@ -51,16 +51,19 @@ candidate:
                             # detail used when two projects share the middle of an email (2d format)
       - name: "CareerForge AI"
         stack: "React, FastAPI, PostgreSQL"
+        when: "Jun 2026 - Present"          # 2f: ending in "Present" = ongoing ("I'm currently building ...")
         detail: "a full-stack web app with 12 REST endpoints and 40+ automated API tests"
         short: "a full-stack web app on FastAPI and PostgreSQL with 12 REST endpoints and 40+ automated API tests"
         keywords: [backend, api, python, product, platform]
       - name: "Judicial AI System"
         stack: "Python, Flask, Neo4j"
+        when: "Jan 2026 - Present"          # 2f: ending in "Present" = ongoing ("I'm currently building ...")
         detail: "an NLP pipeline over 1,000+ documents with a Neo4j graph of the extracted entities"
         short: "an NLP pipeline over 1,000+ documents with a Neo4j graph of the extracted entities"
         keywords: [ai, nlp, llm, ml, data, graph, agent]
       - name: "Serverless FileFinder"
         stack: "AWS Lambda, S3, DynamoDB"
+        when: "Oct 2025 - Dec 2025"          # 2f: ending in "Present" = ongoing ("I'm currently building ...")
         detail: "a serverless file service on 6 AWS Lambda functions with DynamoDB metadata search"
         short: "a serverless file service on 6 AWS Lambda functions with DynamoDB metadata search"
         keywords: [cloud, aws, serverless, infrastructure, payments, fintech]

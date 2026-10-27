@@ -32,6 +32,8 @@ decision-maker. Big companies are kept but mostly filter out (senior roles).
    - **2d email format + bounce-safe batches - done (2026-10-22)**, see "Phase 2d notes" and
      `tests/test_format_2d.py`.
    - **2e refill with safe contacts - done (2026-10-27)**, see "Phase 2e notes" and `tests/test_refill_2e.py`.
+   - **2f genuine supply + per-type bounce gate - done (2026-10-28)**, see "Phase 2f notes" and
+     `tests/test_supply_2f.py`.
 3. Sending & follow-ups: Gmail API (OAuth) from the user's **personal Gmail**.
    Ramp from ~10-15/day to 30-40/day max. Randomized gaps, business hours in the
    recipient's timezone, no open-tracking pixels, resume linked (attached only for recruiters/HR or
@@ -91,7 +93,14 @@ python -m applyflow import-targets     # 2e: config/private/manual_targets.txt (
 python -m applyflow role-check [--all] # 2e: role match from the ATS board / careers page
 python -m applyflow contacts --deep    # 2e: 12 more pages (footer, privacy, terms, team, join-us) for unsafe targets
 python -m applyflow pool --reselect --target-size 650   # 2e: a bigger selection for one run
-python -m applyflow safe-contacts      # 2e: unsent contacts by type, sending days covered
+python -m applyflow safe-contacts      # 2e: unsent contacts by type, sending days covered (2f: by sector, 2f caps)
+python -m applyflow supply --all       # 2f: fintech lists (RBI / Sahamati), consultancy seeds, GitHub lists, YC fintech
+python -m applyflow guess-evidence     # 2f: which stored guesses are backed by evidence (offline)
+python -m applyflow classify-published [--apply]   # 2f: "other" published addresses -> hiring / unsendable
+python -m applyflow referrals          # 2f: output/referrals.csv (large / apply-only companies with a fit role)
+python -m applyflow contacts --deep --shard 0/3     # 2f: new targets too; shards run side by side
+python -m applyflow role-check --checked-since 2026-10-27   # 2f: role matches for targets looked up since a day
+python -m applyflow queue --date D [--no-fresh]     # 2f: per-type gate + freshness re-check of each source page
 pytest
 ```
 
@@ -403,6 +412,78 @@ Open points:
    max_years_required is 1, so loosening that rule would add a few YC role targets (Infinity, AlgoTest, Apollo).
 4. Careers-page role matching is a text heuristic ("AI/ML Engineer Engineering"); 18 of 26 funded targets came back
    unknown.
+
+## Phase 2f notes (genuine supply + per-type bounce gate, 2026-10-27 .. 28)
+
+- **Per-type bounce gate** (`outreach.type_gates`, config `outreach.type_gates`), used by `queue` instead of the overall
+  5% tier-3 gate (`tier3_gate` stays for the old `pick_batch` path only): verified named people and founders@ always
+  open; hiring inboxes paused while 3+ of their last 20 sends bounced; evidence-backed guesses (10/day) and hello@ /
+  hi@ / hey@ / team@ (5/day) paused on the day after one with 2+ of their bounces (and that day itself, once recorded);
+  pure pattern guesses and unsendable addresses closed. `mark-sent` records each send's kind (`outreach_events.kind`);
+  older sends are classified from the stored contact (`send_records`). Order within a batch: tier 1-2 by bounce risk,
+  then companies with a hiring signal (role match, funding in 6 months, 20+ people), then evidence guesses, hello@
+  last. Batch rules (`BatchRules`, profile): `require_written_draft` (only validated Claude drafts are queued) and
+  `type_gates.general_inbox_max_team` 50 (hello@ only at small startups).
+- **Contact kinds**: `contact_kind` adds `evidence_guess`; an inferred address (`guessed` or `strong`) is a pure guess
+  (never sent) unless it carries evidence. A website address is a `verified_person` only with a name and a hiring role
+  (founder / CTO / eng lead / recruiter); unnamed first.last addresses ("person at the company") are not. "Other"
+  published addresses go through `classify_published`: hiring words -> hiring inbox (hrindia@, people@), hey@ ->
+  general inbox, support / sales / ops / billing / legal / press / general-contact words, the company's own name or a
+  lone unconfirmed first name -> unsendable (recorded in `excluded_contacts` by `classify-published --apply`).
+  HIRING_INBOXES gained campus@, freshers@, recruiter(s)@, people@ and suffixed forms (`_HIRING_SUFFIXED`).
+- **Evidence-backed guesses** (`contacts.evidence_for_guess`, stored in `contacts.evidence`): a founder / CTO / eng lead
+  named on a cited page (own site or YC page), MX ok, and a published personal address on the same domain in the same
+  format whose first part is a real first name (`Store.known_first_names`: ~600 names ApplyFlow has seen; so vendor@,
+  complaints@, dmca@ never count). The guess moves to that format's address. Live lookups apply it; `guess-evidence`
+  backfills offline. 24 stored guesses pass of 606.
+- **Large companies** (>300 people, or large by the 2c.1 funding rule): selected in the pool as "hiring inbox only"
+  targets (outside target_size); `large_inbox_search` reads careers / jobs / contact / join pages and keeps only hiring
+  inboxes published there (pages inviting applications rank first); never named employees or guesses. `build_items`
+  enforces it (`OutreachItem.large`). Huge IT-services firms (`pool.it_services`) are added to `never_cold_email`.
+  Manual targets whose note says "large" (or whose pool record is large) get the same treatment.
+- **Ongoing projects**: `Project.when` / `.ongoing` (dates ending "Present"); `drafting.ongoing_failures` fails "I built
+  / I've developed ... <ongoing project>" (rule set "2f"; drafts queued or sent before 2f are locked to "2e" by a store
+  migration). 102 unsent unlocked drafts rewritten (`output/drafts/fix_ongoing_2f.py`).
+- **Sources** (`applyflow/supply.py`, `supply` command, config in sources.yaml): RBI lists (`parse_rbi_entities`;
+  www.rbi.org.in answers HTTP 418 on robots.txt to our User-Agent, so the collector skips it); Sahamati AA / TSP member
+  pages (47 listed, 32 verified); 66 hand-written consultancy seeds (54 verified; sector consultancy is exempt from the
+  services words but needs one tech word on its homepage, `consultancy_fit`); rshetye/AwesomeIndiaStartups (BSD-3,
+  `header_table`, 283 companies, selected via `pool.priority_lists`). `verify_company`: the homepage names it (name
+  minus "Software / Technologies ..." too), India signal on the homepage or a contact / about page, MX. Every pool
+  company carries `sector` (fintech / consultancy, else startup / other on the item: `supply.sector_for`).
+  Remote YC fintechs: 86 jobs pages checked, 0 with a posting open to India. Six manual imports: none had a usable
+  address (Razorpay, Porter, Emergent: no hiring inbox on their own pages -> referrals only).
+- **Freshness check** (`outreach.Freshness`, on by default in `queue`, `--no-fresh` to skip): each picked address's
+  source page is re-read (robots.txt respected) before the batch is stored; for an evidence guess both the published
+  same-format address and the person's name (YC pages: in the embedded JSON). Gone (or 404 / 410) -> dropped into
+  `excluded_contacts` with the date and URL, and the next target is picked; an unreadable page keeps it ("unchecked").
+  **Phase 3's sending engine must run the same check shortly before each send.**
+- **Queued addresses**: a target queued but not yet sent keeps the address it was queued with in `build_items` (the
+  2f filters had made the report fall back to a stored primary - info@ / an unnamed staff address - for two 28 Oct rows;
+  the 27 Oct report was checked: 0 of 28 mismatches).
+- **Bounces 2026-10-27**: careers@digitalpaani.com (mailto button "Send Email" on /about-us) and careers@electricpe.com
+  ("Careers Open roles and applications careers@electricpe.com" on /contact-us) - both really published, still on the
+  page, address doesn't exist (550 5.1.1); recorded with `--stop` (their only other addresses are contact@).
+- **Referrals**: `referrals` -> output/referrals.csv (large / apply-only companies with a fitting role, LinkedIn note
+  <= 300 chars). 6 rows.
+- **Misc**: the CLI prints with `errors="replace"` (a cp1252 console killed a contacts shard on a company name);
+  `contacts --shard i/n` runs lookups in parallel; `contacts --deep` also takes never-looked-up targets; careers-page
+  role lines with "careers / hire / ROR / golang / .net" are skipped.
+- Live 2026-10-28: 75 new sendable contacts (7 verified people, 38 hiring inboxes, 11 evidence guesses, 19 hello@;
+  41 startup, 22 consultancy, 12 fintech). **28 Oct batch stored**: 3 named founders / CTOs, 20 hiring inboxes,
+  7 evidence guesses (fresh-checked, all validated Claude drafts). After it: 4 verified, 20 hiring inboxes,
+  4 evidence guesses, 60 hello@ (only some at small startups with drafts) - about one more full day, then ~5/day.
+  Bounces so far: hiring inbox 4/41, hello@ 3/19, verified people 0/15, founders@ 0/11, info@/contact@ 1/2.
+
+Open points:
+1. **30/day isn't sustainable** under these rules: Indian startups rarely publish hiring inboxes or personal
+   addresses, and pure guesses stay unsendable. Real levers: a new source with published addresses, or loosening a
+   rule (e.g. evidence from any published personal address, hello@ cap).
+2. Hiring inboxes are at 2 of their last 20 bounced; one more bounce pauses them.
+3. IDfy and OkCredit evidence guesses were held back by hand as likely >300 people with no headcount on file; a size
+   source would let the large-company rule catch them.
+4. Careers-page role titles are still a heuristic (fixed by hand: Thoughtworks "Developer careers", Ideas2IT "Hire
+   Data Engineer", RailsFactory "ROR Fullstack Engineer").
 
 ## Calibration backlog
 

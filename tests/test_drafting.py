@@ -322,30 +322,17 @@ class SendTierAndQueueTests(unittest.TestCase):
         self.assertFalse(batch.tier3_open)
         self.assertEqual([r["target_id"] for r in store.queue("2026-10-20")], [it.target_id for it in batch.items])
 
-    def test_tier3_unlocks_two_calendar_days_after_the_first_send(self):
+    def test_pure_guesses_are_never_queued_2f(self):
+        """2f: the per-type gate replaced the tier-3 unlock: a pure pattern guess is never queued, on any day."""
         store = demo_store()
         mark_sent(store, PROFILE, "yc-nimbus", date(2026, 10, 20))
-        day1 = make_queue(store, PROFILE, date(2026, 10, 21))
-        self.assertNotIn("yc-orbit-pay", [it.target_id for it in day1.items])
-        self.assertEqual(day1.gate.state, "locked")
-        self.assertIn("unlocks on 2026-10-22", day1.gate.reason)
-        day2 = make_queue(store, PROFILE, date(2026, 10, 22))
-        self.assertEqual((day2.gate.state, day2.gate.limit), ("limited", 5))
-        ids = [it.target_id for it in day2.items]
-        # Lumen and Cobalt wait in the stored 10-21 batch (not marked sent yet), so day 2 doesn't repeat them.
-        self.assertEqual(day2.held_earlier, 2)
-        self.assertEqual(set(ids), {"yc-orbit-pay", "yc-delta"})
-        self.assertNotIn("yc-nimbus", ids)                               # already sent
-
-    def test_tier3_daily_limit_counts_inside_the_batch(self):
-        store = demo_store()
-        mark_sent(store, PROFILE, "yc-nimbus", date(2026, 10, 20))
-        profile = example_profile()
-        profile.outreach["tier3"]["start_per_day"] = 1
-        batch = make_queue(store, profile, date(2026, 10, 22))
-        self.assertEqual(sum(it.send_tier == 3 for it in batch.items), 1)
-        self.assertEqual(batch.tier3_held, 1)
-        self.assertEqual(len(batch.items), 3)
+        for day in (date(2026, 10, 22), date(2026, 11, 5)):
+            batch = make_queue(store, PROFILE, day)
+            ids = [it.target_id for it in batch.items]
+            self.assertNotIn("yc-orbit-pay", ids)
+            self.assertNotIn("yc-delta", ids)
+            self.assertEqual(batch.gates["guessed"].state, "closed")
+            self.assertEqual(batch.held_by_kind.get("guessed"), 2)
 
     def test_a_bounce_before_unlock_keeps_tier3_locked(self):
         store = demo_store()
@@ -687,7 +674,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(main(args + ["mark-bounced", "yc-orbit-pay", "--date", "2026-10-21"]), 0)
         text = out.getvalue()
         self.assertIn("T1 Orbit Pay", text)
-        self.assertIn("Tier 3 (guessed addresses) locked: nothing sent yet", text)
+        self.assertIn("By contact type (2f per-type gate):", text)
         self.assertIn("Marked 1 sent from the 2026-10-20 batch", text)
         self.assertIn("No more addresses for this company.", text)
 

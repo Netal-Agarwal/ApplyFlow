@@ -112,7 +112,8 @@ CREATE TABLE IF NOT EXISTS contacts (
     rank          INTEGER NOT NULL,
     alternates    TEXT,                        -- JSON list: what to try if a guessed address bounces
     mx            TEXT,                        -- ok | unchecked (DNS lookup failed) | '' (not checked)
-    proof         TEXT                         -- 2c: company site | posting | manual | demoted: ... | ''
+    proof         TEXT,                        -- 2c: company site | posting | manual | demoted: ... | ''
+    evidence      TEXT                         -- 2f: JSON proof behind a sendable guess (person page, same-format address)
 );
 CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company_key);
 
@@ -178,6 +179,7 @@ CREATE TABLE IF NOT EXISTS outreach_events (   -- sent / bounced history (never 
     email       TEXT NOT NULL,
     event       TEXT NOT NULL,                 -- sent | bounced | stopped (bounced, no further addresses)
     send_tier   INTEGER,                       -- the address's tier when sent (tier-3 gate)
+    kind        TEXT,                          -- 2f: contact kind when sent (per-type bounce gate)
     event_date  TEXT NOT NULL,                 -- YYYY-MM-DD
     batch_date  TEXT,
     recorded_at TEXT NOT NULL
@@ -290,12 +292,21 @@ class Store:
                 self.conn.execute("INSERT OR IGNORE INTO draft_rules (target_id, rules, reason, locked_at) "
                                   "VALUES (?, '2c', ?, ?)", (row[0], f"{row[1]} before the 2d format", now))
             self.conn.execute("CREATE TABLE IF NOT EXISTS draft_rules_2d_done (at TEXT)")
+        # Phase 2f: targets already queued or sent when the ongoing-project rule arrived keep their wording, once.
+        if not self.conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'draft_rules_2f_done'").fetchone():
+            now = _now()
+            for row in self.conn.execute("SELECT target_id, 'queued' FROM send_queue UNION "
+                                         "SELECT target_id, event FROM outreach_events").fetchall():
+                self.conn.execute("INSERT OR IGNORE INTO draft_rules (target_id, rules, reason, locked_at) "
+                                  "VALUES (?, '2e', ?, ?)", (row[0], f"{row[1]} before 2f", now))
+            self.conn.execute("CREATE TABLE IF NOT EXISTS draft_rules_2f_done (at TEXT)")
         for table, column, decl in (("jobs", "team_size", "INTEGER"), ("scores", "contact_hint", "TEXT"),
                                      ("scores", "merged_locations", "TEXT"), ("companies", "detected_from", "TEXT"),
                                      ("companies", "status_reason", "TEXT"), ("contacts", "alternates", "TEXT"),
                                      ("contacts", "mx", "TEXT"), ("outreach_events", "send_tier", "INTEGER"),
                                      ("jobs", "poster", "TEXT"), ("contacts", "proof", "TEXT"),
-                                     ("manual_targets", "role_seen", "TEXT")):
+                                     ("manual_targets", "role_seen", "TEXT"), ("contacts", "evidence", "TEXT"),
+                                     ("outreach_events", "kind", "TEXT")):
             cols = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
@@ -537,9 +548,11 @@ class Store:
             for rank, c in enumerate(result.contacts):
                 self.conn.execute(
                     "INSERT INTO contacts (company_key, company, name, role, email, confidence, source, source_url, "
-                    "found_at, is_primary, rank, alternates, mx, proof) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "found_at, is_primary, rank, alternates, mx, proof, evidence) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (t.key, t.company, c.name, c.role, c.email, c.confidence, c.source, c.source_url, now,
-                     int(rank == 0), rank, json.dumps(c.alternates), c.mx, getattr(c, "proof", "")))
+                     int(rank == 0), rank, json.dumps(c.alternates), c.mx, getattr(c, "proof", ""),
+                     json.dumps(c.evidence) if getattr(c, "evidence", None) else ""))
             if getattr(result, "context", None):          # homepage text read during the lookup (2b)
                 self._write_context(t.key, result.context)
             from applyflow.contacts import result_to_json
@@ -670,12 +683,12 @@ class Store:
         return {r["target_id"]: r for r in self.conn.execute("SELECT * FROM written_drafts")}
 
     def add_event(self, target_id: str, company_key: str, email: str, event: str, event_date: str,
-                  batch_date: str = "", send_tier: int | None = None) -> None:
+                  batch_date: str = "", send_tier: int | None = None, kind: str = "") -> None:
         with self.conn:
             self.conn.execute(
                 "INSERT INTO outreach_events (target_id, company_key, email, event, event_date, batch_date, "
-                "recorded_at, send_tier) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (target_id, company_key, email.lower(), event, event_date, batch_date, _now(), send_tier))
+                "recorded_at, send_tier, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (target_id, company_key, email.lower(), event, event_date, batch_date, _now(), send_tier, kind))
 
     def events(self) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM outreach_events ORDER BY event_date, id").fetchall()
@@ -770,6 +783,26 @@ class Store:
         with self.conn:
             self.conn.execute("UPDATE contacts SET confidence = 'guessed', proof = ? WHERE id = ?",
                               (f"demoted: {why}", contact_id))
+
+    def set_contact_evidence(self, contact_id: int, email: str, alternates: list[str], evidence: dict | None) -> None:
+        """2f: record (or clear) the proof behind a guess; the address may move to the alternate the proof fits."""
+        with self.conn:
+            self.conn.execute("UPDATE contacts SET email = ?, alternates = ?, evidence = ? WHERE id = ?",
+                              (email, json.dumps(alternates), json.dumps(evidence) if evidence else "", contact_id))
+
+    def known_first_names(self) -> set[str]:
+        """2f: the first names of every person ApplyFlow has seen (stored contacts, people named on sites and YC
+        pages): a published 'rahul@' shows the first@ format only if 'rahul' is one of them."""
+        from applyflow.contacts import NOT_NAMES, name_parts
+        names = {name_parts(r[0])[0] for r in self.conn.execute("SELECT name FROM contacts WHERE name != ''")}
+        for (details,) in self.conn.execute("SELECT details FROM contact_checks"):
+            for p in json.loads(details or "{}").get("people", []):
+                names.add(name_parts(p.get("name") or "")[0])
+        return {n for n in names if len(n) >= 3 and n not in NOT_NAMES}
+
+    def set_event_kind(self, event_id: int, kind: str) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE outreach_events SET kind = ? WHERE id = ?", (kind, event_id))
 
     def set_contact_proof(self, contact_id: int, url: str, proof: str) -> None:
         with self.conn:

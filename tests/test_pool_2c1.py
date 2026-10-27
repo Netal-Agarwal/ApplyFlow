@@ -93,8 +93,9 @@ class LargeCompanyTests(unittest.TestCase):
         big = company("BigCo", funding=rnd("Series C", "$40 Mn"))
         self.assertEqual(pool_target_hint(big, p), APPLY_ONLY_HINT)
         out = {s.company.name: s for s in select([Scored(big, 90, []), Scored(company("Small"), 50, [])], {}, p, 0)}
-        self.assertFalse(out["BigCo"].selected)
-        self.assertIn("not selected: large - Series C round", out["BigCo"].why_selected)
+        self.assertTrue(out["BigCo"].selected)               # 2f: selected for its own hiring inbox only
+        self.assertIn("selected: large (Series C round", out["BigCo"].why_selected)
+        self.assertIn("hiring inbox only", out["BigCo"].why_selected)
         self.assertTrue(out["Small"].selected)
         reasons = score_company(big, p, TODAY)[1]
         self.assertTrue(any("team size unknown, but Series C round" in r for r in reasons))
@@ -245,21 +246,23 @@ class ReselectTests(unittest.TestCase):
         self.rows = {r["name"]: r for r in self.store.pool_rows()}
 
     def test_pool_size_is_kept(self):
-        self.assertEqual(sum(r["selected"] for r in self.rows.values()), 4)
+        # 4 slots, plus Big Raise: a large company is selected for its own hiring inbox only (2f), outside the slots
+        self.assertEqual(sum(r["selected"] for r in self.rows.values()), 5)
 
     def test_failing_target_dropped_and_next_best_added(self):
         self.assertFalse(self.rows["GyroNav"]["selected"])
         self.assertIn("tech-fit floor", self.rows["GyroNav"]["why_selected"])
         self.assertTrue(self.rows["Next India"]["selected"])
         self.assertEqual({c.company.name for c in self.changes if c.was_selected}, {"GyroNav"})
-        self.assertEqual({c.company.name for c in self.changes if not c.was_selected}, {"Next India", "Tied Portfolio"})
+        self.assertEqual({c.company.name for c in self.changes if not c.was_selected},
+                         {"Next India", "Tied Portfolio", "Big Raise"})
 
     def test_queued_target_is_protected(self):
         self.assertTrue(self.rows["Queued Hardware"]["selected"])
         self.assertIn("queued / locked", self.rows["Queued Hardware"]["why_selected"])
 
     def test_large_and_remote_cap_respected_and_ties_go_to_portfolios(self):
-        self.assertFalse(self.rows["Big Raise"]["selected"])
+        self.assertIn("hiring inbox only", self.rows["Big Raise"]["why_selected"])   # 2f
         self.assertFalse(self.rows["Next Remote"]["selected"])          # cap 0 keeps the India / remote balance
         self.assertTrue(self.rows["Tied Portfolio"]["selected"])        # 34 = 34: portfolio before the old list
         self.assertFalse(self.rows["Old List"]["selected"])

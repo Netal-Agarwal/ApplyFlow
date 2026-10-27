@@ -88,3 +88,107 @@ github_lists:
     format: markdown_table
     locations: "India"
 # Skipped: avinassh/dev-startups-india (names only, no websites; last updated 2021).
+  - id: india-deeptech
+    repo: rshetye/AwesomeIndiaStartups       # BSD-3-Clause (2f): Indian deep-tech startups (AI, security, IoT, ...)
+    branch: main
+    path: README.md
+    format: header_table                     # | Company Name | Product Name | Product Brief | ... | website | ...
+    license: BSD-3-Clause
+    locations: "India"
+# 2f: GitHub lists looked at and skipped: akshit-arora/software-applications-of-india (MIT; 7 large product
+# companies), mdrayan001/100-Companies-15LPA-India (MIT; HTML cards with no company links, large companies),
+# ankushdutt/intern-india-tech (no license; 2022 internship links to big-company career sites),
+# vasanthkumar18/BestCompanies_India (Apache-2.0; large companies only). No public raw list of Indian
+# product-engineering consultancies was found, so consultancies come from the seed list below.
+
+# Phase 2f: fintech lists. Each company is resolved / verified on its own website (names it, India signal, MX);
+# banks, cooperative banks, card networks and PSUs are never added.
+fintech_lists:
+  - id: rbi-nbfc
+    kind: rbi                      # entity tables (Name of the NBFC ...), parsed by supply.parse_rbi_entities
+    label: RBI - NBFC lists (Account Aggregators, P2P lending)
+    url: https://www.rbi.org.in/Scripts/BS_NBFCList.aspx
+    # 2026-10-27: www.rbi.org.in answers ApplyFlow's User-Agent with HTTP 418 on /robots.txt, so robots.txt
+    # can't be read and the polite client won't fetch the list (website.rbi.org.in redirects there). The
+    # payment-aggregator and payment-system-operator lists live on the same host and aren't configured until
+    # their URLs can be confirmed under a readable robots.txt.
+  - id: sahamati-aa
+    kind: sahamati                 # the RBI-licensed Account Aggregators (NBFC-AA), as Sahamati lists them
+    label: Sahamati - Account Aggregators
+    url: https://sahamati.org.in/account-aggregators/
+  - id: sahamati-tsp
+    kind: sahamati
+    label: Sahamati - technology service providers (AA ecosystem)
+    url: https://sahamati.org.in/technology-service-provider/
+
+# Phase 2f: product-engineering consultancies (India offices, engineers building software for clients), written
+# by hand. Each is verified on its own website before it's added (names it, India office / signal, MX); huge
+# IT-services firms are excluded by pool.it_services. team_size only where widely known (over 300 = hiring
+# inbox only).
+consultancies:
+  - {name: Thoughtworks, website: thoughtworks.com, team_size: 10000}
+  - {name: Sahaj Software, website: sahaj.ai}
+  - {name: Equal Experts, website: equalexperts.com}
+  - {name: GeekyAnts, website: geekyants.com, team_size: 500}
+  - {name: BigBinary, website: bigbinary.com}
+  - {name: Incubyte, website: incubyte.co}
+  - {name: Kiprosh, website: kiprosh.com}
+  - {name: Josh Software, website: joshsoftware.com}
+  - {name: Codemancers, website: codemancers.com}
+  - {name: Saeloun, website: saeloun.com}
+  - {name: Tarka Labs, website: tarkalabs.com}
+  - {name: nilenso, website: nilenso.com}
+  - {name: Sedin Technologies, website: sedintechnologies.com}
+  - {name: Mallow Technologies, website: mallow-tech.com}
+  - {name: Kreeti Technologies, website: kreeti.com}
+  - {name: Simform, website: simform.com, team_size: 1500}
+  - {name: Ideas2IT, website: ideas2it.com, team_size: 700}
+  - {name: Beautiful Code, website: beautifulcode.co}
+  - {name: Wednesday Solutions, website: wednesday.is}
+  - {name: QED42, website: qed42.com}
+  - {name: Axelerant, website: axelerant.com}
+  - {name: RailsFactory, website: railsfactory.com}
+  - {name: Technogise, website: technogise.com}
+  - {name: InFoCusp Innovations, website: infocusp.com}
+  - {name: Tech Prescient, website: techprescient.com}
+  - {name: Talentica Software, website: talentica.com}
+  - {name: Crest Data, website: crestdata.ai}
+  - {name: Calsoft, website: calsoftinc.com, team_size: 2000}
+  - {name: Opcito Technologies, website: opcito.com}
+  - {name: Mindbowser, website: mindbowser.com}
+  - {name: Bacancy, website: bacancytechnology.com, team_size: 1000}
+  - {name: Rapidops, website: rapidops.com}
+  - {name: SoluteLabs, website: solutelabs.com}
+  - {name: Aubergine Solutions, website: aubergine.co}
+  - {name: CodeCraft Technologies, website: codecrafttech.com}
+  - {name: Coditas, website: coditas.com}
+  - {name: Accion Labs, website: accionlabs.com, team_size: 3000}
+  - {name: Velotio Technologies, website: velotio.com}
+  - {name: 47Billion, website: 47billion.com}
+  - {name: Squareboat, website: squareboat.com}
+  - {name: Quovantis, website: quovantis.com}
+  - {name: One2N, website: one2n.in}
+  - {name: Ajackus, website: ajackus.com}
+  - {name: Codewave, website: codewave.com}
+  - {name: CoffeeBeans Consulting, website: coffeebeans.io}
+  - {name: SourceFuse, website: sourcefuse.com}
+  - {name: Daffodil Software, website: daffodilsw.com}
+  - {name: Hexaview Technologies, website: hexaviewtech.com}
+  - {name: Trantor, website: trantorinc.com}
+  - {name: Successive Digital, website: successive.tech}
+  - {name: Zuci Systems, website: zucisystems.com}
+  - {name: Nineleaps, website: nineleaps.com}
+  - {name: Robosoft Technologies, website: robosoftin.com, team_size: 1000}
+  - {name: Mantra Labs, website: mantralabsglobal.com}
+  - {name: Sigmoid, website: sigmoid.com}
+  - {name: Affine, website: affine.ai}
+  - {name: Quantiphi, website: quantiphi.com, team_size: 3500}
+  - {name: Tiger Analytics, website: tigeranalytics.com, team_size: 4000}
+  - {name: Xebia, website: xebia.com, team_size: 5000}
+  - {name: Clarion Technologies, website: clariontech.com}
+  - {name: Cybage, website: cybage.com, team_size: 7000}
+  - {name: Synerzip, website: synerzip.com}
+  - {name: TechAhead, website: techaheadcorp.com}
+  - {name: Grey Chain, website: greychaindesign.com}
+  - {name: Systango, website: systango.com}
+  - {name: Hidden Brains, website: hiddenbrains.com}

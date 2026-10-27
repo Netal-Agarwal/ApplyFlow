@@ -280,8 +280,12 @@ class BounceStopAndOrderTests(unittest.TestCase):
             add_company(store, f"yc:{slug}", slug.title(), website=f"https://{slug}.example",
                         contacts=[contact(email, conf, name, "Founder" if name else f"{slug}@ inbox")])
         order = [it.target_id for it in build_items_(store) if it.status == "ready"]
-        self.assertEqual(set(order[:2]), {"yc-person", "yc-staff"})        # stored name, or a first.last address
-        self.assertEqual(order[2:], ["yc-careers", "yc-founders", "yc-hello", "yc-relief", "yc-guess"])
+        self.assertEqual(order[:1], ["yc-person"])                         # a stored name with a hiring role
+        # 2f: an unnamed first.last address on a website (staff) or a role address (relief) isn't a hiring person
+        # (unsendable); a pure guess stays ready but its gate is closed, so it's never queued
+        self.assertEqual(order[1:], ["yc-careers", "yc-founders", "yc-guess", "yc-hello"])   # 2f: hello@ after guesses
+        statuses = {it.target_id: it.status for it in build_items_(store)}
+        self.assertEqual({statuses[t] for t in ("yc-staff", "yc-relief")}, {"unsendable"})
         # 2e: info@ / contact@ are never sent to
         self.assertEqual({it.target_id: it.status for it in build_items_(store)}["yc-info"], "unsendable")
 

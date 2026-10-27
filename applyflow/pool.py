@@ -9,6 +9,12 @@ Hiring-likelihood score (0-100), weights in profile.yaml `pool.weights`, every f
 Existing role targets (A/B openings), manual targets and companies already worked on (a contact
 lookup, a written draft, a queue entry) always stay in. The rest of the ~400 slots go to the best
 scores, with at most `remote_global_cap` remote-global companies and none above `max_team_size`.
+
+Phase 2f: a large company (over 300 people, or a late / big round with no headcount) is selected as a
+"hiring inbox only" target unless it's on `never_cold_email` or a huge IT-services firm (`pool.it_services`);
+YC companies in India that YC lists as hiring, fintechs (India, or a remote YC fintech with a posting open
+to India) and product-engineering consultancies (`sector: consultancy`, exempt from the consulting / services
+words but held to a tech-fit floor) are selected even past `target_size`.
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ from applyflow.config import Profile, load_sources
 from applyflow.discovery import name_key, site_domain
 from applyflow.scoring import MARKETPLACE_HINT
 from applyflow.sources import (YC_ALL_URL, FundingRound, PoolCompany, attach_funding, collect_funding, collect_list,
-                               collect_portfolio, latest_funding, merge, months_ago, yc_pool)
+                               collect_portfolio, latest_funding, merge, months_ago, pool_sector, yc_pool)
 from applyflow.text import matching_phrases
 
 Log = Callable[[str], None]
@@ -73,8 +79,9 @@ def late_round(round_name: str, min_series: str = "C") -> bool:
 
 
 def never_cold_email(name: str, domain: str, profile: Profile) -> str:
-    """The `never_cold_email` entry (a name or a domain) this company matches, or ''."""
-    for entry in profile.never_cold_email:
+    """The `never_cold_email` entry (a name or a domain) this company matches - or a huge IT-services firm from
+    `pool.it_services` (2f) - or ''."""
+    for entry in list(profile.never_cold_email) + list(profile.pool.get("it_services") or []):
         e = entry.strip().lower()
         if not e:
             continue
@@ -154,8 +161,29 @@ def exclusion(c: PoolCompany, profile: Profile, site_text: str = "") -> tuple[st
     big = large_reason(c, profile)
     if big:
         return "large", big
+    if c.sector == "consultancy":                 # 2f: services is the point; hold it to a tech-fit floor instead
+        why = consultancy_fit(c, profile, site_text)
+        return ("tech_floor", why) if why else ("", "")
     why, _ = product_fit(c, profile, site_text)
     return ("tech_floor", why) if why else ("", "")
+
+
+def consultancy_fit(c: PoolCompany, profile: Profile, site_text: str = "") -> str:
+    """2f: a product-engineering consultancy passes when its own words (homepage, one-liner) name software work
+    (`consultancy_min_tech`: 'mid' = one tech word); consulting / services words don't count against it."""
+    text = " ".join([c.description, site_text])
+    high = matching_phrases(text, [w.lower() for w in profile.pool["tech_high"]])
+    need = 2 if str(profile.pool.get("consultancy_min_tech", "mid")) == "high" else 1
+    if len(high) >= need:
+        return ""
+    return f"consultancy whose homepage names no software work ({', '.join(high) or 'no tech words'})"
+
+
+def is_large(c: PoolCompany, profile: Profile) -> str:
+    """2f: over `max_team_size` people, or large by large_reason - '' otherwise."""
+    if c.team_size is not None and c.team_size > int(profile.pool["max_team_size"]):
+        return f"{c.team_size} people"
+    return large_reason(c, profile)
 
 
 def tech_fit(text: str, profile: Profile) -> tuple[str, list[str]]:
@@ -274,17 +302,29 @@ def select(scored: list[Scored], fixed: dict[str, str], profile: Profile, outsid
         if name_key(c.name) in marketplaces:
             s.why_selected = "not selected: recruiting marketplace (hires for clients)"
             continue
-        if c.team_size is not None and c.team_size > size_cap:
-            s.why_selected = f"not selected: {c.team_size} people (apply via postings)"
+        site_text = (site_texts or {}).get(c.key, "")
+        big = is_large(c, profile)
+        if big:                            # 2f: hiring inbox only, unless never cold-emailed / IT services
+            listed = never_cold_email(c.name, c.domain, profile)
+            why, _ = ("", []) if c.sector == "consultancy" else product_fit(c, profile, site_text)
+            if c.sector == "consultancy":
+                why = consultancy_fit(c, profile, site_text)
+            if listed:
+                s.why_selected = f"not selected: large - on the never_cold_email / IT-services list ({listed})"
+            elif why:
+                s.why_selected = f"not selected: large and tech-fit floor - {why}"
+            else:
+                s.selected, s.why_selected = True, f"selected: large ({big}) - its own hiring inbox only (2f)"
             continue
-        kind, why = exclusion(c, profile, (site_texts or {}).get(c.key, ""))
-        if kind == "large":
-            s.why_selected = f"not selected: large - {why} (apply via postings)"
-            continue
+        kind, why = exclusion(c, profile, site_text)
         if kind:
             s.why_selected = f"not selected: tech-fit floor - {why}"
             continue
         recent = recent_funding(c, today, int(cfg.get("recent_funding_weeks", 12))) if today else None
+        priority = priority_2f(c, profile)
+        if priority:                       # past target_size and the remote-global cap
+            s.selected, s.why_selected = True, f"selected: {priority} (2f)"
+            continue
         if slots <= 0 and recent is None:
             s.why_selected = "not selected: below the top ~400"
             continue
@@ -300,6 +340,23 @@ def select(scored: list[Scored], fixed: dict[str, str], profile: Profile, outsid
         s.selected, s.why_selected = True, f"selected: rank {i} by hiring likelihood"
         slots -= 1
     return scored
+
+
+def priority_2f(c: PoolCompany, profile: Profile) -> str:
+    """2f: why a company is selected past target_size - a YC company in India that YC lists as hiring, a fintech,
+    a product-engineering consultancy - or ''. A remote-global fintech only with a YC posting open to India."""
+    if c.sector == "consultancy":
+        return "product-engineering consultancy"
+    if c.region == "india" and "yc" in c.sources and c.hiring:
+        return "YC company in India that YC lists as hiring"
+    if c.region == "india" and any(s in (profile.pool.get("priority_lists") or []) for s in c.sources):
+        return "Indian startup from a 2f list (" + ", ".join(s for s in c.sources if s.startswith("list:")) + ")"
+    if c.sector == "fintech":
+        if c.region == "india":
+            return "fintech in India"
+        if c.india_friendly:
+            return f"remote fintech, {c.india_friendly} (India-friendly)"
+    return ""
 
 
 def recent_funding(c: PoolCompany, today: date, weeks: int = 12) -> FundingRound | None:
@@ -447,6 +504,7 @@ def build_pool(store, client, profile: Profile, today: date, log: Log = print, s
     contexts = store.context_texts()
     scored = []
     for c in pool:
+        c.sector = c.sector or pool_sector(c)              # 2f
         score, reasons = score_company(c, profile, today, c.domain in boards, contexts.get(c.key, ""))
         scored.append(Scored(c, score, reasons))
     site_texts = store.site_texts()
@@ -493,6 +551,7 @@ def reselect(store, profile: Profile, today: date) -> tuple[list[Scored], list[C
     scored = []
     for row in store.pool_rows():
         c = PoolCompany.from_json(json.loads(row["data"]))
+        c.sector = c.sector or pool_sector(c)              # 2f
         score, reasons = score_company(c, profile, today, c.domain in boards, contexts.get(c.key, ""))
         scored.append(Scored(c, score, reasons))
     fixed, outside = _fixed_targets(store, profile, {s.company.domain: s.company for s in scored}, site_texts)

@@ -509,7 +509,7 @@ class ReviewRulesTests(unittest.TestCase):
                                       "https://x.example/legal/account-deletion-policy", "", "website"), "unsendable")
         # a founder whose own address is on the privacy page is still a person
         self.assertEqual(contact_kind("vineet.mehta@x.example", "verified", "https://x.example/privacy-policy",
-                                      "Vineet Mehta", "website"), "verified_person")
+                                      "Vineet Mehta", "website", role="Co-founder"), "verified_person")
         # a hiring inbox on a legal page stays a hiring inbox
         self.assertEqual(contact_kind("hr@x.example", "published_inbox", "https://x.example/legal/privacy-policy", "",
                                       "website"), "hiring_inbox")

@@ -238,21 +238,27 @@ class ApplyOnlyTests(unittest.TestCase):
         profile.contacts["apply_only_team_size"] = 10_000
         self.assertNotEqual(contact_hint(self.job(team_size=5000), profile), APPLY_ONLY_HINT)
 
+    def no_inbox_search(self):
+        """The 2a.1 behaviour: with the 2f hiring-inbox search off (contacts.large_hiring_inbox), no site search."""
+        profile = example_profile()
+        profile.contacts["large_hiring_inbox"] = False
+        return profile
+
     def test_no_contact_search_unless_a_posting_lists_an_email(self):
         big = target(hint=APPLY_ONLY_HINT, board_size=725, company="Bigco")
-        result, session = run(big)
+        result, session = run(big, profile=self.no_inbox_search())
         self.assertEqual((result.status, session.urls), ("apply_only", []))
         self.assertIn("big company (725 open roles): apply via the posting; no contact search", result.reasons)
         with_email = target(hint=APPLY_ONLY_HINT, board_size=725, company="Bigco",
                             jobs=[self.job(emails=["campus@acmerobotics.example"])])
-        result, session = run(with_email)
+        result, session = run(with_email, profile=self.no_inbox_search())
         self.assertEqual([(c.email, c.confidence) for c in result.contacts],
                          [("campus@acmerobotics.example", "verified")])
         self.assertEqual(session.urls, [])                                   # the site isn't searched
 
     def test_counted_as_apply_only(self):
         store = Store(":memory:")
-        result, _ = run(target(hint=APPLY_ONLY_HINT, board_size=725))
+        result, _ = run(target(hint=APPLY_ONLY_HINT, board_size=725), profile=self.no_inbox_search())
         store.save_contact_result(result)
         self.assertEqual(store.contact_counts(), {"apply_only": 1})
         store.close()

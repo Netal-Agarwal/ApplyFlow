@@ -266,7 +266,9 @@ class ScoreTests(unittest.TestCase):
                                                            date="2026-09-01", source_url="u")]), 90, []),
               Scored(company("Seedy", funding=funded("2026-09-01", "Seed")), 50, [])]
         out = {s.company.name: s for s in select(cs, {}, PROFILE, 0)}
-        self.assertEqual([n for n, s in out.items() if s.selected], ["Seedy"])
+        self.assertEqual([n for n, s in out.items() if s.selected], ["Huge", "Z", "Seedy"])
+        for n in ("Huge", "Z"):                     # 2f: large - selected for its own hiring inbox only
+            self.assertIn("its own hiring inbox only (2f)", out[n].why_selected)
 
     def test_tech_fit_low_for_d2c_food_fashion(self):
         low = self.score(company("Masala", description="D2C spice and snacks brand"))[1]
@@ -291,11 +293,11 @@ class SelectionTests(unittest.TestCase):
               Scored(company("Weekday"), 99, [])]
         out = {s.company.name: s for s in select(cs, {"fixed.example": "kept: already a target"}, profile, 1)}
         self.assertTrue(out["Fixed"].selected)                             # always in, whatever its score
-        self.assertFalse(out["Big"].selected)
-        self.assertIn("apply via postings", out["Big"].why_selected)
+        self.assertTrue(out["Big"].selected)                               # 2f: hiring inbox only, no slot
+        self.assertIn("selected: large (900 people) - its own hiring inbox only", out["Big"].why_selected)
         self.assertEqual([n for n in ("R1", "R2") if out[n].selected], ["R1"])
         self.assertIn("remote-global cap", out["R2"].why_selected)
-        self.assertEqual(sorted(n for n, s in out.items() if s.selected), ["Fixed", "I1", "R1"])   # 4 - 1 role
+        self.assertEqual(sorted(n for n, s in out.items() if s.selected), ["Big", "Fixed", "I1", "R1"])   # 4 - 1 role
         self.assertEqual(out["Weekday"].rank, 1)                           # ranked by score regardless...
         self.assertIn("recruiting marketplace", out["Weekday"].why_selected)  # ...but never selected
 

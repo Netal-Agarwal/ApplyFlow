@@ -14,6 +14,11 @@ look, in order of trust, and stop early once a good contact for the right role t
      applied to a named founder / CTO / EM                          -> strong;
      with no confirmed pattern, first@domain for them               -> guessed
 
+Phase 2f: a guess for a named founder / CTO / engineering lead carries `evidence` when the person's page is
+cited, the domain has MX records and a published personal address on the domain has the same format
+(`evidence_for_guess`; the guess moves to the alternate in that format). A company over 300 people
+(apply-only) is searched only for a hiring inbox on its own careers / jobs / contact pages (`large_inbox_search`).
+
 Mail servers are never probed. Nothing here sends anything; Phase 2b drafts, a human
 approves. The homepage text read along the way is kept (company_context) for personalization.
 """
@@ -76,6 +81,7 @@ class Contact:
     alternates: list[str] = field(default_factory=list)   # for guesses: what to try if the first bounces
     mx: str = ""              # ok | unchecked ('' when no MX check ran)
     proof: str = ""           # where a published address was seen: company site | posting | manual | github profile
+    evidence: dict = field(default_factory=dict)          # 2f: why a guess is sendable (evidence_for_guess)
 
     def label(self) -> str:
         who = f"{self.name} ({self.role})" if self.name else self.role
@@ -155,11 +161,16 @@ def role_group(title: str) -> str:
 
 
 HIRING_INBOXES = {"careers", "career", "jobs", "job", "hiring", "hr", "talent", "recruiting", "recruitment",
-                  "recruit", "join", "joinus", "work", "workwithus"}
+                  "recruit", "join", "joinus", "work", "workwithus",
+                  # 2f
+                  "recruiter", "recruiters", "campus", "freshers", "fresher", "people", "talentacquisition"}
+# 2f: a hiring inbox with a region / team suffix: hrindia@, careers.in@, talent-team@ -> its root.
+_HIRING_SUFFIXED = re.compile(r"(careers?|jobs?|hr|talent|recruit(?:ment|ing|ers?)?|hiring|campus|freshers?|people)"
+                              r"[._-]?(?:india|in|team|global|desk)")
 FOUNDER_INBOXES = {"founders", "founder"}
 # Generic inboxes that usually reach the founders at a small startup, best first.
 FOUNDER_REACHING = {"hello": 1, "team": 1, "hi": 1, "contact": 2, "info": 2}
-GENERAL_INBOXES = {"admin", "office", "mail", "enquiries", "enquiry", "inquiries", "connect", "people"}
+GENERAL_INBOXES = {"admin", "office", "mail", "enquiries", "enquiry", "inquiries", "connect"}
 SKIP_LOCALS = {"noreply", "no-reply", "donotreply", "privacy", "security", "abuse", "legal", "billing", "sales",
                "press", "media", "pr", "support", "help", "helpdesk", "dpo", "gdpr", "accessibility", "compliance",
                "investors", "investor", "ir", "partners", "partnerships", "marketing", "feedback", "grievance",
@@ -182,9 +193,7 @@ def classify_address(email: str, small: bool = True) -> tuple[str, str, str, int
     only a `fallback`.
     """
     local = email.split("@", 1)[0].lower()
-    base = re.sub(r"[._-]?\d+$", "", local)
-    if re.sub(r"[._-]", "", base) in FOUNDER_INBOXES | HIRING_INBOXES:      # "join-us@", "work_with_us@"
-        base = re.sub(r"[._-]", "", base)
+    base = _local_base(email)                # "join-us@", "work_with_us@", "hrindia@" (2f)
     if base in SKIP_LOCALS or any(part in SKIP_LOCALS for part in re.split(r"[._+-]", base)) \
             or any(word in base for word in _SKIP_ANYWHERE):      # "loansupport@", "customercare@"
         return None                       # also "help-events@", "support.team@"
@@ -203,7 +212,17 @@ def classify_address(email: str, small: bool = True) -> tuple[str, str, str, int
 def _local_base(email: str) -> str:
     base = re.sub(r"[._-]?\d+$", "", email.split("@", 1)[0].lower())
     squashed = re.sub(r"[._-]", "", base)
-    return squashed if squashed in FOUNDER_INBOXES | HIRING_INBOXES else base
+    if squashed in FOUNDER_INBOXES | HIRING_INBOXES:
+        return squashed
+    m = _HIRING_SUFFIXED.fullmatch(base)
+    return m.group(1) if m else base
+
+
+# A function, not a person: "customer-success@", "partner.institute@", "sales.team@" (2e).
+ROLE_LOCAL = re.compile(r"(?:^|[._-])(?:customer|customers|success|partner|partners|institute|sales|support|admin|ops|"
+                        r"operations|marketing|accounts?|enquir(?:y|ies)|business|bd|media|press|events?|"
+                        r"service|services|office|desk|community|legal|legalnotices|news|newsroom|social|"
+                        r"information|reachus|contactus)(?:$|[._-])", re.I)
 
 
 def shared_inbox(email: str) -> bool:
@@ -573,6 +592,7 @@ class SiteFindings:
     failed: list[str] = field(default_factory=list)
     home: dict[str, str] = field(default_factory=dict)                # homepage summary (Phase 2b)
     careers_page: str = ""                                            # a careers / jobs page that loaded (2c)
+    texts: dict[str, str] = field(default_factory=dict)              # 2f: page text by url (first 20,000 chars)
 
 
 def read_site(client, website: str, domain: str, max_pages: int, deep: bool = False) -> SiteFindings:
@@ -600,6 +620,7 @@ def read_site(client, website: str, domain: str, max_pages: int, deep: bool = Fa
             queue.extend(deep_pages(page, root, max_pages) if deep else likely_pages(page, root, max_pages))
             out.home = {"website": root, "status": "ok", **page_summary(page)}
         text = html_to_text(page)
+        out.texts[url] = text[:20000]
         for email in [m.strip().lower() for m in _MAILTO.findall(page)] + extract_emails(text):
             if same_site(email.rsplit("@", 1)[-1], domain) and email not in [e for e, _ in out.emails]:
                 out.emails.append((email, url))
@@ -760,8 +781,137 @@ def guess_alternates(first: str, last: str, domain: str) -> list[str]:
     return [f"{apply_pattern(p, first, last)}@{domain}" for p in ("first.last", "firstlast")]
 
 
+# ---------------------------------------------------------------------------
+# Phase 2f: evidence-backed guesses, and hiring inboxes at large companies
+# ---------------------------------------------------------------------------
+
+# Locals that are a function, not a first name ("grow@", "query@"): never format evidence.
+NOT_NAMES = (SKIP_LOCALS | HIRING_INBOXES | FOUNDER_INBOXES | GENERAL_INBOXES | set(FOUNDER_REACHING) |
+             {"customers", "customer", "grow", "growth", "ops", "team", "query", "queries", "connect", "partnership",
+              "reach", "reachus", "write", "talk", "demo", "contactus", "letstalk", "general", "corporate", "official",
+              "mail", "email", "inbox", "india", "global", "product", "tech", "engineering", "dev", "developer",
+              "api", "data", "research", "invest", "funding", "accounts", "payments", "refunds", "orders", "ndnc",
+              "dnd", "bills", "nodal", "escalation", "compliance", "kyc", "alerts", "hey", "begin", "start",
+              "humans", "company", "information", "enquiry", "social", "news", "newsroom", "legalnotices", "office",
+              "admin", "studio", "labs", "media", "events", "ask", "info", "contact", "sales", "hello", "welcome"})
+_FORMATS = (("first.last", re.compile(r"[a-z]{2,}\.[a-z]{2,}")), ("first_last", re.compile(r"[a-z]{2,}_[a-z]{2,}")),
+            ("first", re.compile(r"[a-z]{3,12}")))
+
+
+def address_format(email: str, company: str = "") -> str:
+    """The name format of a published personal address: 'priya.sharma@' -> 'first.last', 'rahul@' -> 'first';
+    '' for an inbox, a function word, the company's own name or anything with digits."""
+    local = email.split("@", 1)[0].lower()
+    if shared_inbox(email) or ROLE_LOCAL.search(local) or local in NOT_NAMES \
+            or any(part in NOT_NAMES for part in re.split(r"[._]", local)):
+        return ""
+    squashed = re.sub(r"[^a-z0-9]", "", company.lower())
+    if squashed and (local == squashed or (len(local) >= 4 and squashed.startswith(local))):
+        return ""                                   # "trackk@trackk.in", "plotch@plotch.ai"
+    return next((name for name, rx in _FORMATS if rx.fullmatch(local)), "")
+
+
+def evidence_for_guess(guess: Contact, published: list[dict], domain: str, company: str = "",
+                       mx: str = "", names: set[str] | None = None) -> tuple[dict, str]:
+    """2f: (evidence, '') when a guessed address for a named founder / CTO / engineering lead is sendable, else
+    ({}, why not). Needs (a) the person's name and role on a cited page (the company's site or its YC page),
+    (b) MX records on the domain, (c) a published personal address on the domain in the same format; the guess
+    is the address in that format (first@ for 'rahul@', first.last@ for 'priya.sharma@').
+
+    A published address only shows a format when its first part is a real first name: one of `names` (the first
+    names of every person ApplyFlow has seen, `Store.known_first_names`), so 'vendor@' or 'complaints@' never
+    count. Without `names`, only first.last-shaped addresses count."""
+    if guess.group not in GUESSABLE_GROUPS:
+        return {}, f"{guess.role or 'contact'} isn't a founder, CTO or engineering lead"
+    if not guess.name or not guess.source_url:
+        return {}, "the person's name and role aren't on a cited page"
+    if (mx or guess.mx) != "ok":
+        return {}, f"MX for {domain} not confirmed ({mx or guess.mx or 'not checked'})"
+    first, last = name_parts(guess.name)
+    seen = []
+    for p in published:
+        email = str(p.get("email") or "").lower()
+        if not email.endswith("@" + domain) or p.get("confidence") == "guessed" \
+                or p.get("source") not in ("website", "posting", "manual", "github"):
+            continue
+        fmt = address_format(email, company)
+        if not fmt or (first and email.split("@", 1)[0].startswith(first)):   # the person's own address isn't evidence
+            continue
+        lead = re.split(r"[._]", email.split("@", 1)[0])[0]
+        if (names is None and fmt == "first") or (names is not None and lead not in names):
+            continue
+        seen.append((fmt, email, str(p.get("source_url") or "")))
+    for fmt, email, url in seen:
+        local = apply_pattern(fmt, first, last)
+        if not local:
+            continue
+        return {"format": fmt, "address": f"{local}@{domain}", "person": guess.name, "role": guess.role,
+                "person_url": guess.source_url, "published": email, "published_url": url, "mx": "ok"}, ""
+    if seen:
+        return {}, f"published {seen[0][1]} is {seen[0][0]}, but {guess.name}'s surname isn't known"
+    return {}, f"no published personal address on {domain} shows the format"
+
+
+def apply_evidence(c: Contact, evidence: dict) -> None:
+    """Move a guess to the address its evidence supports (the old first@ becomes an alternate)."""
+    address = evidence["address"]
+    if address != c.email:
+        c.alternates = [a for a in [c.email] + c.alternates if a != address]
+        c.email = address
+    c.evidence = evidence
+    c.note = f"evidence: {evidence['published']} ({evidence['format']}) on {evidence['published_url'] or 'the site'}"
+
+
+# Pages a large company's hiring inbox may come from (2f): careers / jobs / contact / join-us pages.
+_HIRING_PAGE = re.compile(r"career|jobs?\b|join|work-with|contact|campus|hiring|people|life-at", re.I)
+_INVITES = re.compile(r"\b(?:send|email|mail|share|drop|forward)\b[^.\n]{0,60}\b(?:resume|cv|profile|application)s?\b|"
+                      r"\bapply\b|\bopenings?\b|\bopportunit(?:y|ies)\b", re.I)
+
+
+def large_inbox_search(client, target: Target, profile: Profile, dnc: DoNotContact, result: ContactResult,
+                       mx: MXChecker | None = None, log: Log = lambda _: None) -> ContactResult:
+    """2f: a company over 300 people is emailed only at a hiring inbox (careers@, hr@, talent@, recruit*, jobs@,
+    campus@, freshers@, hiring@ ...) it publishes on its own careers / jobs / contact pages - never a named
+    employee or a guess. Inboxes on a page that invites applications rank first."""
+    site = read_site(client, target.website or f"https://{target.domain}", target.domain,
+                     int(profile.contacts["deep_site_pages"]), deep=True)
+    result.context, result.careers_page = site.home, site.careers_page
+    found: list[Contact] = []
+    for email, url in site.emails:
+        kind = classify_address(email, small=False)
+        if kind is None or kind[0] != "hiring_inbox" or not _HIRING_PAGE.search(urlparse(url).path) \
+                or not same_site(site_domain(url), target.domain) or email in [c.email for c in found]:
+            continue
+        invites = bool(_INVITES.search(site.texts.get(url, "")))
+        c = Contact(name="", role=f"{email.split('@')[0]}@ inbox", email=email, confidence="published_inbox",
+                    source="website", source_url=url, group="hiring_inbox", fit=0, proof="company site",
+                    note="large company: hiring inbox on its own page" + ("; the page invites applications"
+                                                                          if invites else ""))
+        if mx is not None:
+            c.mx = mx.check(email.rsplit("@", 1)[-1])
+            if c.mx == "no_mx":
+                result.excluded.append((email, "no MX records"))
+                continue
+        if dnc.blocks(email):
+            result.excluded.append((email, f"on the do-not-contact list ({dnc.blocks(email)})"))
+            continue
+        found.append(c)
+    found.sort(key=lambda c: (0 if "invites" in c.note else 1, inbox_preference(c.email), c.email))
+    result.reasons.append(f"large company (2f): hiring inbox only; read {len(site.read)} page(s), "
+                          f"{len(found)} hiring inbox(es) on careers / jobs / contact pages")
+    result.considered = result.contacts = found[:3]
+    if found:
+        result.status, result.why_primary = "found", "large company: its own published hiring inbox (2f)"
+    else:
+        result.status = "apply_only"
+        result.reasons.append("no hiring inbox on its careers / jobs / contact pages: apply via the posting")
+    log(f"  {target.company:<32} {result.status:<9} " + (found[0].label() if found else "apply-only (no hiring inbox)"))
+    return result
+
+
 def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, github: GitHubBudget,
-                  log: Log = lambda _: None, mx: MXChecker | None = None, deep: bool = False) -> ContactResult:
+                  log: Log = lambda _: None, mx: MXChecker | None = None, deep: bool = False,
+                  names: set[str] | None = None) -> ContactResult:
     result = ContactResult(target=target, status="none")
     fit_table = ROLE_FIT.get(target.hint, ROLE_FIT["founder or CTO"])
     cands: list[Contact] = []
@@ -785,6 +935,9 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
             target.domain, target.domain_source = derived, "posting email"
             result.reasons.append(f"domain {derived} taken from the posting's email")
 
+    if target.apply_only and not cands and client is not None and target.domain \
+            and profile.contacts.get("large_hiring_inbox", True):
+        return large_inbox_search(client, target, profile, dnc, result, mx, log)
     if target.apply_only and not cands:
         result.status = "apply_only"
         size = f"{target.team_size} people" if target.team_size is not None else f"{target.board_size} open roles"
@@ -921,6 +1074,17 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
             ranked.append(c)
     if mx_notes:
         result.reasons.append("MX: " + ", ".join(f"{d} {s.replace('_', ' ')}" for d, s in sorted(mx_notes.items())))
+    # 2f: which guesses are backed by evidence (they move to the address format the evidence shows).
+    published = [asdict(c) for c in ranked if c.confidence != "guessed"]
+    taken = {c.email for c in ranked}
+    for c in [c for c in ranked if c.confidence == "guessed" and c.source == "pattern"]:
+        known = (names or set()) | {name_parts(p.name)[0] for p in people if len(name_parts(p.name)[0]) >= 3}
+        evidence, why = evidence_for_guess(c, published, target.domain, target.company, c.mx, known)
+        if evidence and (evidence["address"] == c.email or evidence["address"] not in taken):
+            apply_evidence(c, evidence)
+            result.reasons.append(f"evidence for {c.name}'s guess: {c.note}")
+        elif why:
+            result.reasons.append(f"{c.email}: pure pattern guess ({why})")
     result.considered = ranked
     result.contacts = ranked[:3]
     if result.excluded:
@@ -1010,8 +1174,11 @@ def build_targets(store, profile: Profile, seeds: list, client=None, log: Log = 
             hint=hint_for_size(row["team_size"], None, profile), website=website, domain=site_domain(website),
             domain_source="discovery" if site_domain(website) else "", team_size=row["team_size"],
             yc_slug=row["key"][3:] if row["key"].startswith("yc:") else "")
+    from applyflow.outreach import large_company_reason
     for row in store.manual_targets():         # add-target
-        targets.setdefault(row["key"], manual_target(row, profile))
+        t = targets.setdefault(row["key"], manual_target(row, profile))
+        if t.kind == "manual" and large_company_reason(store, profile, t.domain, row["note"] or ""):
+            t.hint = APPLY_ONLY_HINT           # 2f: a large company - its own hiring inbox only
     # Phase 2c: the selected outreach pool, best hiring likelihood first (one target per domain).
     from applyflow.pool import pool_target_hint
     from applyflow.sources import PoolCompany

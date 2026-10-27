@@ -55,6 +55,17 @@ DEFAULT_OUTREACH = {
         "max_bounce_rate": 0.05,       # at or above this (bounces / sends), tier 3 pauses
     },
     "general_inbox_per_day": 5,        # 2e: hello@ / hi@ / team@ emails per day (info@ / contact@: never)
+    # 2f: the per-type bounce gate (replaces the overall 5% tier-3 gate in `queue`). Verified named people and
+    # founders@ are never paused by other types' bounces; pure pattern guesses are never sent.
+    "type_gates": {
+        "evidence_guess_per_day": 10,  # evidence-backed guesses per day
+        "day_bounces_pause": 2,        # evidence guesses / hello@: this many bounces in one day pause the type
+                                       # the next day (and the same day, once recorded)
+        "hiring_window": 20,           # hiring inboxes: paused when hiring_max_bounces of the last
+        "hiring_max_bounces": 3,       # hiring_window hiring-inbox sends bounced
+        "general_inbox_max_team": None,  # hello@ only at startups (sector) of at most this many people (unknown ok)
+    },
+    "require_written_draft": False,    # 2f: queue only targets whose draft is a validated Claude draft
     "min_words": 160,                  # draft length between the greeting and the sign-off (2d format)
     "max_words": 200,
 }
@@ -135,6 +146,21 @@ DEFAULT_POOL = {                       # Phase 2c: the ranked pool of companies 
                          "workflow automation", "self-serve", "free trial", "start for free", "book a demo",
                          "request a demo", "personalized demo", "integrate", "automate", "project management software"],
     "software_product_min": 1,
+    # Phase 2f: huge IT-services firms, never emailed (not even their hiring inbox), names or domains.
+    "it_services": ["TCS", "Tata Consultancy Services", "tcs.com", "Infosys", "infosys.com", "Wipro", "wipro.com",
+                    "HCL", "HCLTech", "hcltech.com", "hcl.com", "Accenture", "accenture.com", "Cognizant",
+                    "cognizant.com", "Capgemini", "capgemini.com", "Tech Mahindra", "techmahindra.com", "LTIMindtree",
+                    "ltimindtree.com", "Mphasis", "mphasis.com", "Hexaware", "hexaware.com", "Persistent Systems",
+                    "persistent.com", "Coforge", "coforge.com", "Birlasoft", "birlasoft.com", "L&T Technology Services",
+                    "ltts.com", "Mindtree", "Deloitte", "deloitte.com", "IBM", "ibm.com", "DXC Technology", "dxc.com",
+                    "NTT Data", "nttdata.com", "Zensar", "zensar.com", "Cyient", "cyient.com", "Sonata Software",
+                    "sonata-software.com", "KPIT", "kpit.com", "EPAM", "epam.com", "Genpact", "genpact.com",
+                    "Larsen & Toubro Infotech", "lntinfotech.com", "Tata Elxsi", "tataelxsi.com"],
+    # Phase 2f: a product-engineering consultancy needs at least this tech-fit ("mid": one product word) on its
+    # homepage; the consulting / services words that drop other companies don't count against it.
+    "consultancy_min_tech": "mid",
+    # Phase 2f: pool sources whose companies (India, passing the rules) are selected even past target_size.
+    "priority_lists": ["list:india-deeptech"],
     # Investment firms: a name like this plus investing words on the site.
     "investment_name": ["capital", "ventures", "partners", "investments", "holdings", "asset", "wealth"],
     "investment_words": ["invest", "investing", "investment", "investors", "portfolio", "wealth", "fund",
@@ -249,6 +275,7 @@ def parse_profile(data: dict[str, Any], source_path: Path = PROFILE_PATH) -> Pro
 def _outreach(raw: dict[str, Any]) -> dict[str, Any]:
     out = {**DEFAULT_OUTREACH, **raw}
     out["tier3"] = {**DEFAULT_OUTREACH["tier3"], **(raw.get("tier3") or {})}
+    out["type_gates"] = {**DEFAULT_OUTREACH["type_gates"], **(raw.get("type_gates") or {})}
     return out
 
 
