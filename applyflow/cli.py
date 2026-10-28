@@ -29,6 +29,7 @@
     python -m applyflow contacts --deep  # 2e: more pages for targets with no safe contact
     python -m applyflow safe-contacts    # 2e: unsent safe contacts by kind, and sending days covered
     python -m applyflow supply --all     # 2f: fintech lists, consultancies, GitHub lists, YC fintech -> the pool
+    python -m applyflow supply --consultancies --saas --fintech-seeds --fintech   # 2g: seed lists (new ones only)
     python -m applyflow guess-evidence   # 2f: which stored guesses are backed by evidence (offline)
     python -m applyflow classify-published [--apply]   # 2f: "other" published addresses: hiring or not
     python -m applyflow referrals        # 2f: output/referrals.csv for large / apply-only companies
@@ -118,10 +119,12 @@ def cmd_report(args, profile, store) -> int:
         batch, stored, gate = stored_or_preview_batch(store, profile, items, day)
         from applyflow.outreach import send_records, type_gates
         gates = type_gates(send_records(store), day, profile.outreach)
+        from applyflow.outreach import recheck_due
         outreach = outreach_sections(items, batch, day.isoformat(), stored, load_facts(profile).listing(),
                                      "Per-type gate (2f): " + "; ".join(
                                          f"{k.replace('_', ' ')} {g.reason}" for k, g in gates.items()
-                                         if k in ("evidence_guess", "general_inbox", "hiring_inbox")) + ".")
+                                         if k in ("evidence_guess", "general_inbox", "hiring_inbox")) + ".",
+                                     recheck=recheck_due(items, day))
         outbox = write_outbox_csv(items, {it.target_id for it in batch}, out / "outbox.csv")
     html_path = write_html(rows, out / "opportunities.html", store.stats(), contacts, outreach)
     csv_path = write_csv(rows, out / "opportunities.csv")
@@ -381,7 +384,8 @@ def cmd_supply(args, profile, store) -> int:
     stored pool (verified on their own sites), then the selection is redone offline."""
     from applyflow.contacts import MXChecker
     from applyflow.outreach import parse_day
-    from applyflow.sources import PoolCompany, collect_list
+    from applyflow.discovery import site_domain
+    from applyflow.sources import PoolCompany, collect_list, company_website
     from applyflow import supply
     day = parse_day(args.date)
     if args.target_size:
@@ -400,12 +404,17 @@ def cmd_supply(args, profile, store) -> int:
             got, stats = supply.collect_fintech(client, mx, cfg, profile, log=print, resolve=resolve)
             found += got
             report.append(f"fintech:{cfg['id']}: {stats.get('note', '')}; dropped {len(stats.get('dropped', []))}")
-    if want("consultancies"):
-        seeds = sources.get("consultancies") or []
-        print(f"Consultancy seeds ({len(seeds)})...")
-        got, stats = supply.collect_consultancies(client, mx, seeds, profile, log=print)
+    in_pool = {json.loads(r["data"]).get("domain", "") for r in store.pool_rows()}
+    for flag, sector in (("consultancies", "consultancy"), ("saas", "saas"), ("fintech_seeds", "fintech")):
+        if not want(flag):
+            continue
+        source, cfg_key = supply.SEED_SECTORS[sector][:2]
+        seeds = sources.get(cfg_key) or []
+        fresh = [s for s in seeds if site_domain(company_website(str(s["website"]))) not in in_pool]   # 2g
+        print(f"{cfg_key} seeds ({len(seeds)}; {len(seeds) - len(fresh)} already in the pool, kept as they are)...")
+        got, stats = supply.collect_seeds(client, mx, fresh, profile, sector, log=print)
         found += got
-        report.append(f"consultancy:seed: {stats['note']}")
+        report.append(f"{source}: {stats['note']} ({len(seeds) - len(fresh)} already in the pool)")
         for d in stats["dropped"]:
             print(f"  dropped {d}")
     if want("lists"):
@@ -427,6 +436,20 @@ def cmd_supply(args, profile, store) -> int:
                 friendly += 1
                 print(f"  {c.name:<28} {why}")
         report.append(f"yc fintech (remote): {len(cands)} checked, {friendly} India-friendly")
+    if want("yc_fintech_india"):                   # 2g: India engineering on the company's own site
+        rows = [PoolCompany.from_json(json.loads(r["data"])) for r in store.pool_rows()]
+        cands = [c for c in rows if c.region != "india" and "yc" in c.sources and not c.india_friendly
+                 and (c.sector or supply.pool_sector(c)) == "fintech" and c.website]
+        print(f"YC fintechs abroad: checking {len(cands)} sites for an office / engineering team in India...")
+        hits = 0
+        for c in cands:
+            why = supply.india_engineering(client, c.website)
+            if why:
+                c.india_friendly, c.sector = f"India engineering on its site ({why})", "fintech"
+                found.append(c)
+                hits += 1
+                print(f"  {c.name:<28} {why}")
+        report.append(f"yc fintech (India engineering): {len(cands)} checked, {hits} with an India office / team")
     scored, changes, new = supply.extend_pool(store, profile, found, day, log=print)
     added = [c for c in changes if c.now.selected and not c.was_selected]
     print("\n".join(report))
@@ -491,6 +514,14 @@ def cmd_safe_contacts(args, profile, store) -> int:
           + ", ".join(f"{k or '-'}={v}" for k, v in sorted(t["by_sector"].items()))
           + f". At {profile.outreach['daily_batch']}/day with the 2f caps: {t['days']} day(s), "
             f"{t['full_days']} of them full.")
+    from applyflow.outreach import guess_outcomes
+    labels = {"first_name": "first-name address (founder-style)", "staff_first_last": "staff first.last address"}
+    for axis, title in (("format", "address format"), ("evidence", "evidence kind")):
+        rows = guess_outcomes(store)[axis]
+        if rows:
+            print(f"Evidence-guess outcomes by {title} (2g): " + "; ".join(
+                f"{labels.get(k, k)} sent {v['sent']}, bounced {v['bounced']}, replied {v['replied']}"
+                for k, v in sorted(rows.items())))
     return 0
 
 
@@ -671,6 +702,20 @@ def cmd_mark_bounced(args, profile, store) -> int:
                                                             if it.draft.failures else "") + ".")
     else:
         print("No more addresses for this company.")
+    return 0
+
+
+def cmd_mark_replied(args, profile, store) -> int:
+    from applyflow.outreach import OUTCOME_LABELS, OutreachError, mark_replied, parse_day
+    try:
+        it = mark_replied(store, profile, args.email, args.outcome, parse_day(args.date), args.recheck or "",
+                          args.contact or "", args.role or "", _dnc())
+    except OutreachError as exc:
+        print(f"error: {exc}")
+        return 1
+    print(f"Reply recorded for {it.target_id} ({it.sent_email}): {OUTCOME_LABELS[it.outcome]}"
+          + (f", recheck {it.recheck}" if it.recheck else "") + "; follow-ups stopped."
+          + (f" Stored {it.replied_by} as a verified named person (source: the reply)." if it.replied_by else ""))
     return 0
 
 
@@ -902,6 +947,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--stop", action="store_true", help="don't move on to the target's alternates or backups")
     p.set_defaults(func=cmd_mark_bounced)
 
+    p = sub.add_parser("mark-replied", help="2g: record a reply (stops follow-ups; declined_warm comes back on its date)")
+    p.add_argument("email", help="the address the email went to, or the replier's address on the same domain")
+    p.add_argument("--outcome", required=True, choices=["interested", "declined_warm", "declined", "auto_ack"])
+    p.add_argument("--recheck", help="YYYY-MM-DD: list the target again in the report's Recheck list (declined_warm)")
+    p.add_argument("--contact", help='"Name <email>": the person who replied, stored as a verified named person')
+    p.add_argument("--role", help="the replier's role, if known (e.g. HR, Founder)")
+    p.add_argument("--date", help="YYYY-MM-DD the reply came (default today)")
+    p.set_defaults(func=cmd_mark_replied)
+
     p = sub.add_parser("add-target", help="add a company of your own as an outreach target")
     p.add_argument("company")
     p.add_argument("--website", required=True, help="the company's domain, e.g. acme.com")
@@ -940,9 +994,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--all", action="store_true", help="every 2f source")
     p.add_argument("--fintech", action="store_true", help="fintech_lists in sources.yaml (RBI, Sahamati)")
     p.add_argument("--consultancies", action="store_true", help="the consultancy seed list in sources.yaml")
+    p.add_argument("--saas", action="store_true", help="2g: the mid-size product / SaaS seed list in sources.yaml")
+    p.add_argument("--fintech-seeds", dest="fintech_seeds", action="store_true",
+                   help="2g: the fintech seed list in sources.yaml")
     p.add_argument("--lists", action="store_true", help="refresh the GitHub lists in sources.yaml")
     p.add_argument("--yc-fintech", dest="yc_fintech", action="store_true",
                    help="remote YC fintechs with a posting open to India")
+    p.add_argument("--yc-fintech-india", dest="yc_fintech_india", action="store_true",
+                   help="2g: YC fintechs headquartered abroad whose own site shows an office / engineering in India")
     p.add_argument("--date", help="as of this day (YYYY-MM-DD, default today)")
     p.add_argument("--target-size", type=int, default=0, help="targets to select this run (default pool.target_size)")
     p.set_defaults(func=cmd_supply)

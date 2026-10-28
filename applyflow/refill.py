@@ -651,15 +651,51 @@ def parse_targets_file(text: str) -> tuple[list[TargetLine], list[str]]:
 _ROLE_LINE = re.compile(r"^[A-Z][\w/&+.,()' -]{4,80}$")
 
 
+_NOT_A_ROLE = re.compile(
+    r"\bclosed\b|\bfilled\b|\bcommunity\b|\bhub\b|^(?:join|explore|meet|view|apply|see|browse)\b|"
+    r"salesforce|dot ?net|\bflutter\b|react native|\bios\b|\bandroid\b|\bphp\b|wordpress|magento|shopify|\bsap\b|"
+    r"\bodoo\b|servicenow|\bunity\b|\bdrupal\b|laravel|"
+    # site links and hire-us pages, not openings ("Developer Portal", "Onboard a Pre-Vetted Developer")
+    r"\bportal\b|\bdocs?\b|documentation|developer (?:experience|support|tooling|productivity|relations)|"
+    r"\bshape\b|\bonboard\b|pre-vetted|\bdedicated\b|^developers?$|"
+    r"\baem\b|\bcpq\b|svelte|uipath|liferay|tallyprime|\bangular(?:js)?\b|\bvue\b|\bmern\b|\bmean stack\b", re.I)
+_PREFERRED_TITLE = [(re.compile(r"python|fastapi|flask|back-?end|serverless", re.I), 3),
+                    (re.compile(r"intern|fresher|junior|\bjr\b|associate|graduate|trainee|\bsde[ -]?(?:i|1)\b", re.I), 2),
+                    (re.compile(r"software (?:engineer|developer)|\bsde\b|data engineer|ai|ml", re.I), 1)]
+_ROLE_WORDS = {"senior", "junior", "software", "backend", "back-end", "frontend", "front-end", "full", "full-stack",
+               "data", "machine", "ai", "ai/ml", "ml", "python", "java", "associate", "lead", "principal", "staff",
+               "devops", "cloud", "qa", "test", "mobile", "web", "product", "node", "sde", "site", "platform",
+               "graduate", "trainee", "intern", "engineering", "research", "applied", "forward", "deployed",
+               "solutions", "systems", "application", "api", "integration", "big", "database", "security"}
+_PERSON_FIRST = re.compile(r"^([A-Z][a-z]+)\s+([A-Z][a-z]+)\s+(?=\S)")
+_REQ_CODE = re.compile(r"^[A-Z]{2,6}[-/ ]?\d{2,4}(?:[-/]\d+)*\s*[-:|]\s*")          # "CLO-2026-099 - "
+_TRAILING_CITY = re.compile(r"\s*[-,(|]?\s*\b(?:bengaluru|bangalore|mumbai|pune|noida|gurugram|gurgaon|hyderabad|"
+                            r"chennai|delhi|ahmedabad|kochi|jaipur|indore|kolkata|remote)\)?\s*$", re.I)
+
+
+def clean_role_title(line: str) -> str:
+    """2g: 'CLO-2026-099 - Backend AI Engineer' -> 'Backend AI Engineer'; 'AL/ML Engineer Noida' -> 'AL/ML Engineer'."""
+    return _TRAILING_CITY.sub("", _REQ_CODE.sub("", line)).strip() or line
+
+
+def _person_first(line: str) -> bool:
+    """2g: a line that starts with a person's name (two capitalised words that aren't role words)."""
+    m = _PERSON_FIRST.match(line)
+    return bool(m) and not ({m.group(1).lower(), m.group(2).lower()} & _ROLE_WORDS)
+
+
 def careers_page_roles(text: str, profile: Profile) -> tuple[list[str], int]:
     """(titles that fit, how many job-like titles the page lists) from a careers page's text. A title fits when
     it names a target role family, passes the title filter and isn't marked senior by the title filter."""
     fits, seen = [], 0
-    for line in (ln.strip() for ln in (text or "").splitlines()):
+    for line in (clean_role_title(ln.strip()) for ln in (text or "").splitlines()):
         if not _ROLE_LINE.match(line) or len(line.split()) > 9:
             continue
         # 2f: "Developer careers", "Hire Data Engineer" (a hire-us page) and stacks I don't have aren't openings.
         if re.search(r"\bcareers?\b|\bhire\b|\bhiring\b|\bror\b|\brails\b|\bgolang\b|\.net\b", line, re.I):
+            continue
+        # 2g: closed roles, community / hub links, "<Employee Name> SDE - I" (a team page), and stacks I don't have
+        if _NOT_A_ROLE.search(line) or _person_first(line):
             continue
         probe = Job(source="careers", external_id="", company="", title=line, url="")
         if not re.search(r"\b(engineer|developer|intern|sde|programmer|scientist|architect|analyst|designer|"
@@ -669,6 +705,8 @@ def careers_page_roles(text: str, profile: Profile) -> tuple[list[str], int]:
         if title_exclusion(probe, profile) is None and classify_family(probe, profile) is not None \
                 and line not in fits:
             fits.append(line)
+    # 2g: the title the email names is the best fit for me, not the first one listed
+    fits.sort(key=lambda t: -sum(w for rx, w in _PREFERRED_TITLE if rx.search(t)))
     return fits, seen
 
 

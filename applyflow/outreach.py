@@ -57,6 +57,13 @@ STATUS_LABELS = {"ready": "ready to send", "sent": "sent", "exhausted": "every a
                 "unsendable": "only info@ / contact@ or legal-page addresses (not sent to, 2e)",
                 "duplicate": "another target for the same company is sent, queued or ahead of it"}
 KIND_ORDER = {"role": 0, "manual": 1, "general_outreach": 2}
+# 2g: what a reply means. Every outcome stops follow-ups; auto_ack also confirms delivery; declined_warm targets come
+# back in the report's Recheck list on their recheck date.
+OUTCOMES = ("interested", "declined_warm", "declined", "auto_ack")
+OUTCOME_LABELS = {"interested": "replied: interested", "declined_warm": "replied: not now, stay in touch",
+                  "declined": "replied: declined", "auto_ack": "automatic acknowledgement (delivered)"}
+# 2g: after `mark-bounced --stop`, only these can reopen a target - never another guess.
+REOPEN_KINDS = ("verified_person", "hiring_inbox")
 
 
 def target_id(company_key: str) -> str:
@@ -263,6 +270,24 @@ class OutreachItem:
     protected: bool = False                    # queued on any day, sent / bounced, or held to an older rule set
     sector: str = ""                           # 2f: fintech | consultancy | startup | other
     large: bool = False                        # 2f: over 300 people (apply-only): hiring inbox only
+    outcome: str = ""                          # 2g: interested | declined_warm | declined | auto_ack (mark-replied)
+    outcome_date: str = ""
+    recheck: str = ""                          # 2g: YYYY-MM-DD when a declined_warm target is looked at again
+    replied_by: str = ""                       # 2g: "Name <email>" of the person who replied, if any
+
+    @property
+    def followups_stopped(self) -> bool:
+        """2g: a recorded reply (any outcome, auto-acknowledgements included) ends the follow-up sequence."""
+        return bool(self.outcome)
+
+    @property
+    def guess_rank(self) -> int:
+        """2g: evidence-backed guesses whose evidence is a first-name address (founder-style, rahul@) before those
+        backed only by a staff first.last address; 2 for anything else."""
+        a = self.address
+        if a is None or a.kind != "evidence_guess":
+            return 2
+        return 0 if evidence_kind(a.evidence) == "first_name" else 1
 
     @property
     def inbox_pref(self) -> int:
@@ -454,7 +479,17 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
             item.status, item.sent_email, item.sent_date = "sent", sent[-1]["email"], sent[-1]["event_date"]
             item.address = next((a for a in seq if a.email == item.sent_email), Address(email=item.sent_email))
         elif stopped:
-            item.status, item.status_note = "stopped", f"bounced {stopped[-1]['event_date']}; not moved on to "                                                        f"its alternates or backups"
+            # 2g: a stopped target reopens only through a verified named person or a published hiring inbox found
+            # since (never another guess, never the stopped address's alternates)
+            reopen = [a for a in remaining if a.kind in REOPEN_KINDS and a.email not in bounced
+                      and (a.kind != "hiring_inbox" or a.proof in ("company site", "reply", "posting"))]
+            if reopen and not blocked:
+                item.address, item.backups = reopen[0], reopen[1:]
+                item.status_note = f"reopened: {reopen[0].email} ({reopen[0].kind}) after the " \
+                                   f"{stopped[-1]['event_date']} stop"
+            else:
+                item.status, item.status_note = "stopped", f"bounced {stopped[-1]['event_date']}; not moved on to " \
+                    "its alternates or backups (2g: only a verified person or published hiring inbox can reopen it)"
         elif hold:
             item.status, item.status_note = hold.split(":", 1)
         elif not seq:
@@ -478,6 +513,13 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
             inputs.to_email, inputs.contact_name, inputs.contact_role = a.email, name, a.role
             inputs.confidence, inputs.contact_group = a.confidence, a.group
             item.send_tier = a.tier
+        replies = [e for e in evs if e["event"] == "replied"]
+        if replies:                        # 2g: mark-replied
+            r = replies[-1]
+            item.outcome, item.outcome_date = r["outcome"] or "", r["event_date"]
+            item.recheck, item.replied_by = r["recheck_date"] or "", r["note"] or ""
+            item.status_note = f"{OUTCOME_LABELS.get(item.outcome, item.outcome)} {item.outcome_date}" + \
+                (f"; recheck {item.recheck}" if item.recheck else "") + "; no follow-ups"
         item.why = _why(check, inputs, kind)
         item.manual_links = _links(item)
         from applyflow.supply import sector_for
@@ -496,8 +538,14 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         signal = it.kind == "role" or bool(it.inputs.funding.get("recent")) or (size or 0) > 20
         # 2f: capped hello@ / hi@ / team@ come after the evidence-backed guesses (tier 3)
         general = bool(it.address) and it.address.kind == "general_inbox"
+        # 2g: within tiers 1-2, named hiring people and founders@ first, then hiring inboxes - established companies
+        # first (50+ people, or a consultancy / fintech / SaaS: these delivered best) - then the rest by bounce risk
+        akind = it.address.kind if it.address else ""
+        group = 0 if akind in ("verified_person", "founders") else 1 if akind == "hiring_inbox" else 2
+        established = it.sector in ("consultancy", "fintech", "saas") or (size or 0) >= 50
         return (STATUS_ORDER.get(it.status, 9), 3.5 if general else (0 if low_risk else it.send_tier or 9),
-                it.bounce_rank if low_risk else 0, 0 if signal else 1, KIND_ORDER.get(it.kind, 3),
+                group if low_risk else 0, (0 if established else 1) if low_risk else 0,
+                it.bounce_rank if low_risk else it.guess_rank, 0 if signal else 1, KIND_ORDER.get(it.kind, 3),
                 -(it.hl_score if it.hl_score is not None else -1), it.inbox_pref, -(it.best_score or 0),
                 0 if size is not None and lo <= size <= hi else 1, size if size is not None else 10**6,
                 it.company.lower())
@@ -1102,6 +1150,98 @@ def mark_batch_sent(store, profile: Profile, batch_day: date, dnc: DoNotContact 
         marked.append(f"{it.target_id} -> {r['email']}")
     refresh_drafts(store, profile, dnc)
     return marked
+
+
+def evidence_kind(evidence: dict | str | None) -> str:
+    """2g: what backs an evidence guess - 'first_name' (the published same-format address is a bare first name,
+    usually a founder's: rahul@) or 'staff_first_last' (a staff member's first.last-style address), '' if none."""
+    if isinstance(evidence, str):
+        evidence = json.loads(evidence) if evidence else {}
+    published = (evidence or {}).get("published", "")
+    if not published:
+        return ""
+    return "staff_first_last" if re.search(r"[._-]", published.split("@", 1)[0]) else "first_name"
+
+
+def guess_format(evidence: dict | str | None) -> str:
+    """2g: the guessed address's format: 'first@', 'first.last@' or 'other'."""
+    if isinstance(evidence, str):
+        evidence = json.loads(evidence) if evidence else {}
+    return {"first": "first@", "first.last": "first.last@"}.get((evidence or {}).get("format", ""), "other")
+
+
+def guess_outcomes(store) -> dict[str, dict[str, dict[str, int]]]:
+    """2g: evidence-guess sends by address format and by evidence kind: sent, bounced, replied (a human reply,
+    any outcome but auto_ack)."""
+    contacts = {r["email"]: r for r in store.conn.execute("SELECT email, evidence FROM contacts")}
+    events = store.events()
+    bounced = {(e["target_id"], e["email"]) for e in events if e["event"] == "bounced"}
+    replied = {e["target_id"] for e in events if e["event"] == "replied" and e["outcome"] != "auto_ack"}
+    out: dict[str, dict[str, dict[str, int]]] = {"format": {}, "evidence": {}}
+    for e in events:
+        if e["event"] != "sent" or (e["kind"] or "") != "evidence_guess":
+            continue
+        c = contacts.get(e["email"])
+        ev = c["evidence"] if c is not None else ""
+        for axis, key in (("format", guess_format(ev)), ("evidence", evidence_kind(ev) or "unknown")):
+            row = out[axis].setdefault(key, {"sent": 0, "bounced": 0, "replied": 0})
+            row["sent"] += 1
+            row["bounced"] += (e["target_id"], e["email"]) in bounced
+            row["replied"] += e["target_id"] in replied
+    return out
+
+
+def find_sent_target(items: list[OutreachItem], email: str) -> OutreachItem:
+    """2g: the sent target a reply belongs to - the address it was sent to, else the one sent target on that
+    address's domain (a person replying on a founders@ / careers@ thread)."""
+    email = email.lower().strip()
+    hits = [it for it in items if it.sent_email and it.sent_email.lower() == email]
+    if not hits:
+        domain = email.split("@", 1)[-1]
+        hits = [it for it in items if it.sent_email and it.sent_email.lower().split("@", 1)[-1] == domain]
+    if len(hits) != 1:
+        raise OutreachError(f"{len(hits) or 'no'} sent target(s) for {email}"
+                            + (" - mark it sent first (`mark-sent <id> --date ...`)" if not hits else ""))
+    return hits[0]
+
+
+def parse_contact(text: str) -> tuple[str, str]:
+    """'Naresh Kumar <nkumar@nuvizz.com>' -> ('Naresh Kumar', 'nkumar@nuvizz.com')."""
+    m = re.fullmatch(r"\s*(.*?)\s*<\s*([^<>\s]+@[^<>\s]+)\s*>\s*", text or "")
+    if not m or not m.group(1):
+        raise OutreachError(f"--contact must look like \"Name <email>\", got {text!r}")
+    return m.group(1), m.group(2).lower()
+
+
+def mark_replied(store, profile: Profile, email: str, outcome: str, day: date, recheck: str = "", contact: str = "",
+                 role: str = "", dnc: DoNotContact | None = None) -> OutreachItem:
+    """2g: record a reply to a sent email. Every outcome stops follow-ups; auto_ack also counts as delivered;
+    declined_warm needs a recheck date (the report lists it again then). `contact` ("Name <email>") is stored as a
+    verified named person (source: the reply), kept across re-lookups."""
+    if outcome not in OUTCOMES:
+        raise OutreachError(f"outcome must be one of {', '.join(OUTCOMES)}")
+    if recheck:
+        recheck = parse_day(recheck).isoformat()
+    if outcome == "declined_warm" and not recheck:
+        raise OutreachError("declined_warm needs --recheck YYYY-MM-DD")
+    it = find_sent_target(build_items(store, profile, dnc), email)
+    who = ""
+    if contact:
+        name, addr = parse_contact(contact)
+        if addr.split("@", 1)[1] != it.sent_email.split("@", 1)[1]:
+            raise OutreachError(f"{addr} isn't on {it.company}'s domain ({it.sent_email})")
+        store.add_reply_contact(it.company_key, it.company, name, role, addr, f"reply to {it.sent_email}")
+        who = f"{name} <{addr}>"
+    store.add_event(it.target_id, it.company_key, it.sent_email, "replied", day.isoformat(), outcome=outcome,
+                    recheck_date=recheck, note=who)
+    items = refresh_drafts(store, profile, dnc)
+    return next(i for i in items if i.target_id == it.target_id)
+
+
+def recheck_due(items: list[OutreachItem], today: date) -> list[OutreachItem]:
+    """2g: declined_warm targets whose recheck date has arrived, oldest first."""
+    due = [it for it in items if it.outcome == "declined_warm" and it.recheck and it.recheck <= today.isoformat()]
+    return sorted(due, key=lambda it: (it.recheck, it.company.lower()))
 
 
 def mark_bounced(store, profile: Profile, tid: str, day: date, dnc: DoNotContact | None = None,

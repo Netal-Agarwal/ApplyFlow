@@ -259,9 +259,23 @@ def _outreach_card(it, in_batch: bool) -> str:
     )
 
 
+def recheck_section(due: list) -> str:
+    """2g: declined_warm targets whose recheck date has arrived (mark-replied --recheck)."""
+    if not due:
+        return ""
+    e = html.escape
+    rows = "".join(
+        f'<div class="target"><div class="top"><span class="title">{e(it.company)}</span>'
+        f'<span class="company">recheck {e(it.recheck)} · replied {e(it.outcome_date)}</span></div>'
+        f'<div class="line">Sent to {e(it.sent_email)}'
+        + (f"; reply from {e(it.replied_by)}" if it.replied_by else "") + "</div></div>" for it in due)
+    return (f'<h1>Recheck</h1><p class="sub">{len(due)} target(s) said "not now, stay in touch" and their recheck date '
+            f'has come: look for a new opening and write to the person who replied.</p>{rows}')
+
+
 def outreach_sections(items, batch: list, batch_day: str, batch_stored: bool, facts_lines: list[str],
-                      tier3_note: str = "") -> str:
-    """Today's batch and every outreach target (Phase 2b), as HTML."""
+                      tier3_note: str = "", recheck: list | None = None) -> str:
+    """Today's batch and every outreach target (Phase 2b), as HTML (2g: the Recheck list first, when due)."""
     e = html.escape
     batch_ids = {it.target_id for it in batch}
     counts: dict[str, int] = {}
@@ -275,6 +289,7 @@ def outreach_sections(items, batch: list, batch_day: str, batch_stored: bool, fa
     stats = [("Targets", len(items)), ("Ready", counts.get("ready", 0)), ("Sent", counts.get("sent", 0)),
              ("Claude-written", written), ("Today", len(batch))]
     return (
+        recheck_section(recheck or []) +
         f'<h1>Today\'s batch · {e(batch_day)}</h1>'
         f'<p class="sub">{len(batch)} emails ({e(origin)}). Nothing is sent by ApplyFlow: open each in Gmail, '
         f'attach the resume where it says <b>attach</b>, send, then <code>mark-sent</code>.'

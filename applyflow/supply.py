@@ -55,6 +55,7 @@ class Verified:
     name: str = ""
     website: str = ""
     context: dict[str, str] = field(default_factory=dict)      # homepage title / description / snippet
+    text: str = ""                                             # 2g: the homepage's visible text (seed_fit)
 
 
 def _squash(text: str) -> str:
@@ -73,6 +74,18 @@ def site_name(page: str, domain: str) -> str:
     return base.capitalize()
 
 
+_CERT_FAILED = re.compile(r"CERTIFICATE_VERIFY_FAILED|SSLCertVerificationError|certificate verify failed", re.I)
+
+
+def www_retry(site: str, exc: Exception) -> str:
+    """2g: 'https://www.<domain>' when the bare domain failed TLS certificate verification (a server that sends an
+    incomplete chain on the apex), else ''. TLS checks are never turned off: the www. host must verify too."""
+    host = re.sub(r"^https?://", "", site).split("/")[0]
+    if host.startswith("www.") or not _CERT_FAILED.search(str(exc)):
+        return ""
+    return f"https://www.{host}"
+
+
 def verify_company(client, mx, name: str, website: str, need_india: bool = True) -> Verified:
     """2f: is this the company, on its own site? The homepage names it (title, meta or the first lines), an India
     signal shows on the homepage or a contact / about / locations page (when `need_india`), and the domain has MX
@@ -84,7 +97,13 @@ def verify_company(client, mx, name: str, website: str, need_india: bool = True)
     try:
         page = client.get_page(site)
     except FetchError as exc:
-        return Verified(False, f"homepage failed ({exc})", website=site)
+        www = www_retry(site, exc)
+        if not www:
+            return Verified(False, f"homepage failed ({exc})", website=site)
+        try:                                       # 2g: once, on the www. host, certificates still verified
+            page, site = client.get_page(www), www
+        except FetchError as exc2:
+            return Verified(False, f"homepage failed ({exc}; {www} too: {exc2})", website=site)
     summary = page_summary(page)
     name = name or site_name(page, domain)
     text = html_to_text(re.sub(r"<(script|style)\b.*?</\1\s*>", " ", page, flags=re.S | re.I))[:20000]
@@ -113,7 +132,7 @@ def verify_company(client, mx, name: str, website: str, need_india: bool = True)
         return Verified(False, f"MX {status}", name, site)
     ctx = {"website": site, "status": "ok", **summary}
     return Verified(True, f"names the company; India signal on {where}; MX ok" if need_india else
-                    "names the company; MX ok", name, site, ctx)
+                    "names the company; MX ok", name, site, ctx, text[:6000])
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +170,7 @@ def rbi_company_name(entity: str) -> str:
     return " ".join(name.split()).strip(" .,&-") or entity
 
 
-_SKIP_LINK = re.compile(r"sahamati|github\.com|youtube\.com|discord|rebit\.org|swagger|linkedin|twitter|x\.com|"
+_SKIP_LINK = re.compile(r"sahamati|faceofindia|zohopublic|forms\.|github\.com|youtube\.com|discord|rebit\.org|swagger|linkedin|twitter|x\.com|"
                         r"facebook|instagram|google\.com|apple\.com", re.I)
 
 
@@ -236,14 +255,67 @@ def india_friendly(client, profile: Profile, c: PoolCompany) -> str:
     return ""
 
 
+_IN_CITY = (r"(?:bengaluru|bangalore|mumbai|new delhi|delhi|gurugram|gurgaon|noida|hyderabad|pune|chennai|"
+            r"ahmedabad|kochi|jaipur|indore|kolkata|india)")
+_IN_ENGINEERING = re.compile(
+    rf"(?:office|offices|engineering|engineers|development (?:centre|center)|tech (?:hub|centre|center)|team|hub|"
+    rf"headquarter(?:s|ed)?|located|based)\b[^.\n]{{0,60}}\b{_IN_CITY}\b|\b{_IN_CITY}\b[^.\n]{{0,40}}"
+    rf"\b(?:office|engineering|development (?:centre|center)|tech hub|hub)\b", re.I)
+INDIA_ENGINEERING_PAGES = ["", "/careers", "/jobs", "/about", "/about-us", "/contact", "/contact-us", "/company"]
+
+
+def india_engineering(client, website: str) -> str:
+    """2g: a YC fintech headquartered abroad with engineering in India: the first sentence on its own site
+    (homepage, careers, about, contact pages) that ties an office / engineering / team word to an Indian city,
+    as '<page>: <sentence>', else ''. Customers or prices in India don't count."""
+    site = company_website(website)
+    for path in INDIA_ENGINEERING_PAGES:
+        try:
+            text = html_to_text(re.sub(r"<(script|style)\b.*?</\1\s*>", " ", client.get_page(site + path),
+                                       flags=re.S | re.I))[:40000]
+        except FetchError:
+            continue
+        m = _IN_ENGINEERING.search(text)
+        if m:
+            return f"{path or '/'}: {' '.join(m.group(0).split())[:120]}"
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Consultancies
 # ---------------------------------------------------------------------------
 
-def collect_consultancies(client, mx, seeds: list[dict[str, str]], profile: Profile,
-                          log: Log = lambda _: None) -> tuple[list[PoolCompany], dict[str, Any]]:
-    """The seed list's consultancies that verify on their own site (named, India office, MX) - sector consultancy."""
+# 2g: a consultancy's own homepage says it builds software for clients; a SaaS company's names its product.
+CLIENT_WORK = re.compile(r"\bclients?\b|\bcustomers?' (?:products?|platforms?)|product engineering|product development|"
+                         r"software development (?:company|services|partner)|development services|custom software|"
+                         r"\bcase stud(?:y|ies)\b|\bour work\b|\bhire (?:dedicated )?developers\b|outsourc|offshore|"
+                         r"engineering partner|technology partner|digital transformation|\bwe build\b|"
+                         r"(?:app|web|mobile app|software) development", re.I)
+PRODUCT_WORK = re.compile(r"\bsaas\b|\bplatform\b|\bapis?\b|\bsdk\b|book a demo|request a demo|get a demo|"
+                          r"schedule a demo|free trial|start (?:for )?free|sign ?up|get started|pricing|"
+                          r"\bdashboard\b|\bintegrations?\b|\bsoftware\b|\bapp\b", re.I)
+SEED_SECTORS = {"consultancy": ("consultancy:seed", "consultancies", "Product engineering consultancy", CLIENT_WORK,
+                                "no client-work words on its homepage (not a software services firm)"),
+                "saas": ("saas:seed", "saas", "Indian product / SaaS company", PRODUCT_WORK,
+                         "no product words on its homepage"),
+                "fintech": ("fintech:seed", "fintech_seeds", "Fintech", PRODUCT_WORK,
+                            "no product words on its homepage")}
+
+
+def seed_fit(sector: str, context: dict[str, str], page_text: str = "") -> str:
+    """2g: '' when the verified homepage shows the seed's kind of business (client software work for a consultancy,
+    a product for SaaS / fintech), else why not."""
+    _, _, _, words, why = SEED_SECTORS[sector]
+    text = " ".join([context.get("title", ""), context.get("description", ""), context.get("snippet", ""), page_text])
+    return "" if words.search(text) else why
+
+
+def collect_seeds(client, mx, seeds: list[dict[str, Any]], profile: Profile, sector: str = "consultancy",
+                  log: Log = lambda _: None) -> tuple[list[PoolCompany], dict[str, Any]]:
+    """A hand-written seed list's companies that verify on their own site (named, India office, MX, and - 2g - the
+    homepage shows client software work / a product). Sector consultancy (2f), saas or fintech (2g)."""
     from applyflow.pool import never_cold_email
+    source, cfg_key, tag, _, _ = SEED_SECTORS[sector]
     out, stats = [], {"found": len(seeds), "kept": 0, "dropped": []}
     for seed in seeds:
         name, site = str(seed["name"]), str(seed["website"])
@@ -252,23 +324,29 @@ def collect_consultancies(client, mx, seeds: list[dict[str, str]], profile: Prof
             stats["dropped"].append(f"{name}: never_cold_email / IT services ({listed})")
             continue
         v = verify_company(client, mx, name, site)
-        if not v.ok:
-            stats["dropped"].append(f"{name}: {v.why}")
-            log(f"    drop {name}: {v.why}")
+        why = "" if not v.ok else seed_fit(sector, v.context, v.text)
+        if not v.ok or why:
+            stats["dropped"].append(f"{name}: {v.why if not v.ok else why}")
+            log(f"    drop {name}: {v.why if not v.ok else why}")
             continue
         domain = site_domain(v.website)
         size = seed.get("team_size")
         out.append(PoolCompany(key=f"pool:{domain}", name=name, website=v.website, domain=domain,
-                               sources=["consultancy:seed"], source_urls=[f"config/sources.yaml (consultancies)"],
+                               sources=[source], source_urls=[f"config/sources.yaml ({cfg_key})"],
                                description=(v.context.get("description") or "")[:200],
                                locations=str(seed.get("locations") or "India"),
                                team_size=int(size) if isinstance(size, int) else None,
-                               tags=["Product engineering consultancy"], sector="consultancy", region="india",
-                               context=v.context))
+                               tags=[tag], sector=sector, region="india", context=v.context))
         log(f"    keep {name:<28} {v.website} ({v.why})")
     stats["kept"] = len(out)
     stats["note"] = f"{stats['found']} seeds, {stats['kept']} verified"
     return out, stats
+
+
+def collect_consultancies(client, mx, seeds: list[dict[str, str]], profile: Profile,
+                          log: Log = lambda _: None) -> tuple[list[PoolCompany], dict[str, Any]]:
+    """The seed list's consultancies that verify on their own site (named, India office, MX) - sector consultancy."""
+    return collect_seeds(client, mx, seeds, profile, "consultancy", log)
 
 
 # ---------------------------------------------------------------------------

@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS outreach_events (   -- sent / bounced history (never 
     target_id   TEXT NOT NULL,
     company_key TEXT,
     email       TEXT NOT NULL,
-    event       TEXT NOT NULL,                 -- sent | bounced | stopped (bounced, no further addresses)
+    event       TEXT NOT NULL,                 -- sent | bounced | stopped (bounced, no further addresses) | replied (2g)
     send_tier   INTEGER,                       -- the address's tier when sent (tier-3 gate)
     kind        TEXT,                          -- 2f: contact kind when sent (per-type bounce gate)
     event_date  TEXT NOT NULL,                 -- YYYY-MM-DD
@@ -306,7 +306,8 @@ class Store:
                                      ("contacts", "mx", "TEXT"), ("outreach_events", "send_tier", "INTEGER"),
                                      ("jobs", "poster", "TEXT"), ("contacts", "proof", "TEXT"),
                                      ("manual_targets", "role_seen", "TEXT"), ("contacts", "evidence", "TEXT"),
-                                     ("outreach_events", "kind", "TEXT")):
+                                     ("outreach_events", "kind", "TEXT"), ("outreach_events", "outcome", "TEXT"),
+                                     ("outreach_events", "recheck_date", "TEXT"), ("outreach_events", "note", "TEXT")):
             cols = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
@@ -541,10 +542,11 @@ class Store:
     # -- contacts (Phase 2a) ---------------------------------------------------
 
     def save_contact_result(self, result) -> None:
-        """Replace a company's contacts with this lookup's top 3 (primary first)."""
+        """Replace a company's contacts with this lookup's top 3 (primary first). 2g: people who replied to us
+        (source 'reply') are kept."""
         t, now = result.target, _now()
         with self.conn:
-            self.conn.execute("DELETE FROM contacts WHERE company_key = ?", (t.key,))
+            self.conn.execute("DELETE FROM contacts WHERE company_key = ? AND COALESCE(source, '') != 'reply'", (t.key,))
             for rank, c in enumerate(result.contacts):
                 self.conn.execute(
                     "INSERT INTO contacts (company_key, company, name, role, email, confidence, source, source_url, "
@@ -683,12 +685,25 @@ class Store:
         return {r["target_id"]: r for r in self.conn.execute("SELECT * FROM written_drafts")}
 
     def add_event(self, target_id: str, company_key: str, email: str, event: str, event_date: str,
-                  batch_date: str = "", send_tier: int | None = None, kind: str = "") -> None:
+                  batch_date: str = "", send_tier: int | None = None, kind: str = "", outcome: str = "",
+                  recheck_date: str = "", note: str = "") -> None:
         with self.conn:
             self.conn.execute(
                 "INSERT INTO outreach_events (target_id, company_key, email, event, event_date, batch_date, "
-                "recorded_at, send_tier, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (target_id, company_key, email.lower(), event, event_date, batch_date, _now(), send_tier, kind))
+                "recorded_at, send_tier, kind, outcome, recheck_date, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (target_id, company_key, email.lower(), event, event_date, batch_date, _now(), send_tier, kind,
+                 outcome, recheck_date, note))
+
+    def add_reply_contact(self, company_key: str, company: str, name: str, role: str, email: str,
+                          source_url: str) -> None:
+        """2g: a person who replied to us - a verified named person (source 'reply', proof 'reply'), kept across
+        re-lookups. Never the primary: the target's next step is the recheck, not a new email."""
+        with self.conn:
+            self.conn.execute("DELETE FROM contacts WHERE company_key = ? AND email = ?", (company_key, email.lower()))
+            self.conn.execute(
+                "INSERT INTO contacts (company_key, company, name, role, email, confidence, source, source_url, "
+                "found_at, is_primary, rank, alternates, mx, proof) VALUES (?, ?, ?, ?, ?, 'verified', 'reply', ?, ?, 0, "
+                "90, '[]', 'ok', 'reply')", (company_key, company, name, role, email.lower(), source_url, _now()))
 
     def events(self) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM outreach_events ORDER BY event_date, id").fetchall()

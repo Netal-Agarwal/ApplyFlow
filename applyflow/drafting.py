@@ -283,7 +283,7 @@ class DraftInputs:
     rules: str = "2f"               # "2b" / "2c" / "2e": queued or sent under an older rule set (PRE_2F_RULES)
     funding: dict[str, str] = field(default_factory=dict)   # sourced round: round, amount, date, source_url
     hl_score: int | None = None     # hiring likelihood (pool), for packets
-    sector: str = ""                # 2f: fintech | consultancy | startup | other
+    sector: str = ""                # 2f: fintech | consultancy | startup | other (2g: saas)
 
     @property
     def first_name(self) -> str:
@@ -1108,7 +1108,8 @@ def render_packet(inputs: DraftInputs, draft: Draft, facts: Facts, meta: dict[st
     if inputs.sector:
         lines.append(f"- Sector (2f): {inputs.sector}" + {
             "fintech": " - connect the work to reliability, transactions, security or APIs",
-            "consultancy": " - connect the work to shipping production software for clients across stacks"}.get(
+            "consultancy": " - connect the work to shipping production software for clients across stacks",
+            "saas": " - connect the work to the product's APIs, integrations and scale"}.get(
             inputs.sector, ""))
     lines += ["", "## Company context", "",
               f"- Website: {inputs.website or '-'}",

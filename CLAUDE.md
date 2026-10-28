@@ -34,11 +34,17 @@ decision-maker. Big companies are kept but mostly filter out (senior roles).
    - **2e refill with safe contacts - done (2026-10-27)**, see "Phase 2e notes" and `tests/test_refill_2e.py`.
    - **2f genuine supply + per-type bounce gate - done (2026-10-28)**, see "Phase 2f notes" and
      `tests/test_supply_2f.py`.
+   - **2g seed lists at scale + reply outcomes - done (2026-10-28)**, see "Phase 2g notes",
+     `tests/test_supply_2g.py` and `tests/test_replies_2g.py`.
 3. Sending & follow-ups: Gmail API (OAuth) from the user's **personal Gmail**.
    Ramp from ~10-15/day to 30-40/day max. Randomized gaps, business hours in the
    recipient's timezone, no open-tracking pixels, resume linked (attached only for recruiters/HR or
    when a posting asks for one by email - the 2b `resume_action` rule),
    reply detection stops sequences, 1-2 follow-ups, permanent do-not-contact list.
+   **`check-inbox` must classify every reply as human reply / auto-reply / bounce and apply the 2g outcomes
+   automatically** (`outreach.mark_replied`: interested / declined_warm + recheck date / declined / auto_ack, the
+   replier stored as a verified person; `mark_bounced --stop` for a hard 550 5.1.1 on a guess). Any outcome stops
+   follow-ups (`OutreachItem.followups_stopped`); auto_ack counts as delivered.
 4. Insights: reply/interview rates by source, tier, template.
 
 Later: FastAPI + SQLAlchemy dashboard (user's own stack) replacing the CLI report;
@@ -101,6 +107,9 @@ python -m applyflow referrals          # 2f: output/referrals.csv (large / apply
 python -m applyflow contacts --deep --shard 0/3     # 2f: new targets too; shards run side by side
 python -m applyflow role-check --checked-since 2026-10-27   # 2f: role matches for targets looked up since a day
 python -m applyflow queue --date D [--no-fresh]     # 2f: per-type gate + freshness re-check of each source page
+python -m applyflow supply --consultancies --saas --fintech-seeds --fintech   # 2g: seed lists (only seeds not in the pool)
+python -m applyflow supply --yc-fintech-india       # 2g: YC fintechs abroad with an office / engineering in India
+python -m applyflow mark-replied <email> --outcome {interested,declined_warm,declined,auto_ack} [--recheck D] [--contact "Name <email>"] [--role R]
 pytest
 ```
 
@@ -484,6 +493,70 @@ Open points:
    source would let the large-company rule catch them.
 4. Careers-page role titles are still a heuristic (fixed by hand: Thoughtworks "Developer careers", Ideas2IT "Hire
    Data Engineer", RailsFactory "ROR Fullstack Engineer").
+
+## Phase 2g notes (seed lists at scale, reply outcomes, 2026-10-28)
+
+- **Seed lists** (`supply.collect_seeds`, sources.yaml `consultancies` / `saas` / `fintech_seeds`): 428 consultancies
+  (66 from 2f + 362 new: Pune, Bangalore, Hyderabad, Ahmedabad, Noida / Gurgaon, Chennai, Kochi, Jaipur, Indore ...),
+  107 mid-size product / SaaS companies (`sector: saas`, source `saas:seed`), 64 fintechs (`fintech:seed`). team_size is
+  an approximate headcount from general knowledge (over 300 = hiring inbox only, the 2f large rule). `supply` now only
+  verifies seeds whose domain isn't already in the pool. Verification = 2f's `verify_company` plus `seed_fit`: a
+  consultancy's homepage must show client software work (`CLIENT_WORK`: clients, product engineering, custom software,
+  case studies, offshore ...), a SaaS / fintech homepage a product (`PRODUCT_WORK`). Pool: `saas` selected past
+  target_size (`priority_2f`), `SOURCE_PRIORITY` gains saas. Drafts: a SaaS angle line (`SECTOR["saas"]` in drafts_2g.py).
+- **TLS**: when the bare domain fails certificate verification (incomplete chain on the apex), `verify_company` retries
+  once on `https://www.<domain>` with verification on (`www_retry`); still failing -> dropped. Never disable TLS checks.
+  2026-10-28: 3 sites recovered, 10 still failed and were dropped.
+- **Fintech lists**: FACE members (faceofindia.org/members, `kind: sahamati`, same logo-link parser; `_SKIP_LINK` drops
+  the association's own links and its Zoho form): 84 listed, 58 verified (44 new). Skipped: Payments Council of India
+  (members page rendered by JavaScript), DLAI (404), Sahamati FIU / FIP pages (names only, mostly banks / NBFCs).
+  `supply --yc-fintech-india` (`india_engineering`): a YC fintech headquartered abroad counts when its own homepage /
+  careers / about / contact page ties an office / engineering / team word to an Indian city (customers or prices in
+  India don't count): 86 checked, 1 (Gerald; its only contact is a pure guess).
+- **Careers-page roles** (`refill.careers_page_roles`): closed roles, "Join our ... community", hubs, docs / portal /
+  developer-experience links, hire-us pages ("Onboard a Pre-Vetted Developer", "Dedicated Developer"), lines starting
+  with an employee's name ("Alok Kumar SDE - I"), and stacks not in the facts (Salesforce, .NET, Flutter, React Native,
+  iOS / Android, PHP, WordPress, Magento, Shopify, SAP, Odoo, ServiceNow, Unity, Drupal, Laravel, AEM, CPQ, Svelte,
+  UiPath, Liferay, Angular, Vue, MERN) are not openings; requisition codes and trailing cities are stripped
+  (`clean_role_title`); the title named in the email is the best fit (Python / backend, then fresher words), not the
+  first listed. A careers-page "yes" turns a general target into a role email, so this matters.
+- **Evidence fixes**: section headings aren't people ("Customer Testimonials" was a CEO at Synoverge: `_NAME_STOP`), and
+  role inboxes aren't first names (enterprise@haptik.ai backed three founder guesses: `NOT_NAMES`). Guesses whose
+  evidence is a first-name address (founder-style, rahul@) rank above those backed only by a staff first.last address
+  (`OutreachItem.guess_rank`, `evidence_kind`); `guess_outcomes` (printed by `safe-contacts`) tracks evidence-guess
+  sends / bounces / human replies by address format (first@ / first.last@ / other) and by evidence kind.
+- **Batch order** (tiers 1-2): named hiring people and founders@ first, then hiring inboxes at established companies
+  (50+ people or consultancy / fintech / SaaS: 20/20 delivered on 2026-10-28), then by bounce risk.
+- **Replies** (`mark-replied`, `outreach.mark_replied`): `replied` events with `outcome` (interested / declined_warm /
+  declined / auto_ack), `recheck_date` and `note` (columns added to outreach_events). Any outcome stops follow-ups
+  (`followups_stopped`); auto_ack counts as delivered; declined_warm needs `--recheck` and shows in the report's
+  **Recheck** list from that date (`recheck_due`, `report.recheck_section`). `--contact "Name <email>"` (same domain as
+  the sent address) stores the replier as a verified named person, source / proof `reply`; `save_contact_result` keeps
+  reply contacts across re-lookups. The target is found by the sent address or, failing that, its domain.
+- **Stopped targets** reopen only through a verified named person or a published hiring inbox (`REOPEN_KINDS`), never
+  another guess or the stopped address's alternates. The 6 earlier stopped targets have none, so they stay stopped.
+- Live 2026-10-28: 28 Oct batch marked sent (30 sent, 1 bounced: Decentro's evidence guess rohit.taneja@, staff
+  first.last evidence; gate 1 bounce, still capped at 10). Replies: HydraDB declined_warm (Nishkarsh Srivastava,
+  recheck 2026-12-01), nuVizz declined_warm (Naresh Kumar, HR, recheck 2027-01-05), Robosoft auto_ack (stays on
+  referrals.csv). Pool 3146 -> 3552 (406 new: consultancy 250, SaaS 73, FACE 44, fintech seeds 39). A DNS outage
+  during the first supply run dropped 259 seeds; the second run redid every seed not yet in the pool.
+  **29 Oct batch stored**: 11 named people + 19 hiring inboxes, 25 consultancy / 1 SaaS / 1 fintech / 3 startup,
+  all Claude drafts, all fresh. New sendable since 2g: 80 (67 uncapped: 8 people, 59 hiring inboxes; 5 evidence
+  guesses, 8 hello@), 27 of them in the 29 Oct batch. Drafts: 76 written by `output/drafts/drafts_2g.py` +
+  `openings_2g.json`, all passing. IDfy / OkCredit guesses held back again (excluded_contacts).
+  After the 29 Oct batch: 129 sendable (55 hiring inboxes, 7 evidence guesses, 67 hello@) = 16 days under the caps,
+  only 2 of them full 30/day.
+
+Open points:
+1. **The 150 goal was not met (67 uncapped).** Consultancy yield at scale is ~20% of verified (50 / 250), not 2f's
+   33% (the first 66 seeds were the best-known firms); SaaS 10%, fintech 10-14%. Of 379 2g targets: 141 have only pure
+   pattern guesses, 79 are large with no hiring inbox on 12-13 of their own pages (ATS forms), 43 no contact, 38 only
+   info@ / contact@ / legal-page addresses. Levers: another seed round (~10-20% yield), or a rule decision (hello@ at
+   consultancies of 50+ people; evidence from a staff address for a named founder).
+2. Seed team sizes are estimates; a wrong one moves a company across the 300 line (hiring inbox only).
+3. 8 hello@ addresses at consultancy / SaaS / fintech companies have no draft: the batch rule only sends hello@ at
+   startups of 50 or fewer.
+4. Careers-page role matching is still a text heuristic; check role emails' titles in the review screen.
 
 ## Calibration backlog
 

@@ -373,6 +373,9 @@ _NAME_STOP = {
     "intern", "associate", "specialist", "consultant", "marketing", "sales", "design", "research", "growth",
     "acquisition", "partner", "senior", "junior", "staff", "principal", "backend", "frontend", "full", "stack",
     "guide", "survival", "letter", "note", "message", "podcast", "webinar", "event", "events",
+    # 2g: section headings ("Customer Testimonials" on synoverge.com was taken for a CEO)
+    "customer", "testimonial", "testimonials", "client", "clients", "reviews", "review", "stories", "success",
+    "case", "studies", "partners", "awards", "certifications",
 }
 
 
@@ -793,7 +796,10 @@ NOT_NAMES = (SKIP_LOCALS | HIRING_INBOXES | FOUNDER_INBOXES | GENERAL_INBOXES | 
               "api", "data", "research", "invest", "funding", "accounts", "payments", "refunds", "orders", "ndnc",
               "dnd", "bills", "nodal", "escalation", "compliance", "kyc", "alerts", "hey", "begin", "start",
               "humans", "company", "information", "enquiry", "social", "news", "newsroom", "legalnotices", "office",
-              "admin", "studio", "labs", "media", "events", "ask", "info", "contact", "sales", "hello", "welcome"})
+              "admin", "studio", "labs", "media", "events", "ask", "info", "contact", "sales", "hello", "welcome",
+              # 2g: role inboxes that aren't first names (enterprise@haptik.ai backed three founder guesses)
+              "enterprise", "enterprises", "business", "partners", "client", "clients", "testimonials", "solutions",
+              "services", "marketing", "projects", "project", "quotes", "quote", "careers", "vendor", "vendors"})
 _FORMATS = (("first.last", re.compile(r"[a-z]{2,}\.[a-z]{2,}")), ("first_last", re.compile(r"[a-z]{2,}_[a-z]{2,}")),
             ("first", re.compile(r"[a-z]{3,12}")))
 

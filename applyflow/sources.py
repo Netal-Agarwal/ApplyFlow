@@ -43,7 +43,7 @@ _NOT_A_COMPANY = re.compile(
     r"bit\.ly|linktr\.ee|notion\.so|substack\.com|economictimes\.indiatimes\.com|techcrunch\.com)$", re.I)
 
 # whose data wins when sources disagree (2f: fintech lists and consultancy seeds after funding news)
-SOURCE_PRIORITY = ["yc", "portfolio", "funding", "fintech", "consultancy", "list"]
+SOURCE_PRIORITY = ["yc", "portfolio", "funding", "fintech", "consultancy", "saas", "list"]
 
 # 2f: fintech words in a company's tags, sector or one-liner.
 FINTECH_WORDS = re.compile(r"\b(?:fin-?tech|payments?|payment gateway|lending|lender|loans?|credit (?:card|line|score|"
@@ -527,10 +527,12 @@ def attach_funding(pool: list[PoolCompany], rounds: list[FundingRound], client=N
 
 
 def pool_sector(c: PoolCompany) -> str:
-    """2f: 'consultancy' (from the consultancy seeds), 'fintech' (a fintech list, or fintech words in its tags,
+    """2f: 'consultancy' (from the consultancy seeds), 'saas' (2g: the product / SaaS seeds), 'fintech' (a fintech list, or fintech words in its tags,
     funding sector or one-liner), else ''."""
     if any(s.startswith("consultancy:") for s in c.sources):
         return "consultancy"
+    if any(s.startswith("saas:") for s in c.sources):
+        return "saas"
     if any(s.startswith("fintech:") for s in c.sources):
         return "fintech"
     text = " ".join(c.tags + [f"{r.sector} {r.subsector}" for r in c.funding] + [c.description])

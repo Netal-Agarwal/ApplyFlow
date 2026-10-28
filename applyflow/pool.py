@@ -347,6 +347,8 @@ def priority_2f(c: PoolCompany, profile: Profile) -> str:
     a product-engineering consultancy - or ''. A remote-global fintech only with a YC posting open to India."""
     if c.sector == "consultancy":
         return "product-engineering consultancy"
+    if c.sector == "saas" and c.region == "india":
+        return "mid-size Indian product / SaaS company (2g seed)"
     if c.region == "india" and "yc" in c.sources and c.hiring:
         return "YC company in India that YC lists as hiring"
     if c.region == "india" and any(s in (profile.pool.get("priority_lists") or []) for s in c.sources):
