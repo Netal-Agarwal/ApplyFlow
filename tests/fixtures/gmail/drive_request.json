@@ -1,0 +1,47 @@
+{
+  "id": "18f0a1b2c3d4e5f9",
+  "threadId": "thr-drive-9",
+  "labelIds": [
+    "INBOX",
+    "UNREAD"
+  ],
+  "snippet": "Arjun Rao (arjun@zeta.example) is requesting access to the following file",
+  "sizeEstimate": 4000,
+  "historyId": "123456",
+  "internalDate": "1793595600000",
+  "payload": {
+    "partId": "0",
+    "mimeType": "text/plain",
+    "filename": "",
+    "headers": [
+      {
+        "name": "From",
+        "value": "\"Arjun Rao (via Google Drive)\" <drive-shares-dm-noreply@google.com>"
+      },
+      {
+        "name": "Reply-To",
+        "value": "Arjun Rao <arjun@zeta.example>"
+      },
+      {
+        "name": "To",
+        "value": "me@example.com"
+      },
+      {
+        "name": "Subject",
+        "value": "Share request for \"Your_Resume.pdf\""
+      },
+      {
+        "name": "Content-Type",
+        "value": "text/plain; charset=UTF-8"
+      },
+      {
+        "name": "Content-Type",
+        "value": "text/plain; charset=\"UTF-8\""
+      }
+    ],
+    "body": {
+      "size": 117,
+      "data": "QXJqdW4gUmFvIChhcmp1bkB6ZXRhLmV4YW1wbGUpIGlzIHJlcXVlc3RpbmcgYWNjZXNzIHRvIHRoZSBmb2xsb3dpbmcgZmlsZToKWW91cl9SZXN1bWUucGRmCk9wZW4gdGhlIHNoYXJpbmcgc2V0dGluZ3MK"
+    }
+  }
+}

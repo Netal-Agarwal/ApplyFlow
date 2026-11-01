@@ -36,7 +36,8 @@ decision-maker. Big companies are kept but mostly filter out (senior roles).
      `tests/test_supply_2f.py`.
    - **2g seed lists at scale + reply outcomes - done (2026-10-28)**, see "Phase 2g notes",
      `tests/test_supply_2g.py` and `tests/test_replies_2g.py`.
-3. Sending & follow-ups: Gmail API (OAuth) from the user's **personal Gmail**.
+3. Sending & follow-ups - **built 2026-11-01, not yet live** (see "Phase 3 notes" and `tests/test_sending_3.py`):
+   Gmail API (OAuth) from the user's **personal Gmail**.
    Ramp from ~10-15/day to 30-40/day max. Randomized gaps, business hours in the
    recipient's timezone, no open-tracking pixels, resume linked (attached only for recruiters/HR or
    when a posting asks for one by email - the 2b `resume_action` rule),
@@ -109,7 +110,14 @@ python -m applyflow role-check --checked-since 2026-10-27   # 2f: role matches f
 python -m applyflow queue --date D [--no-fresh]     # 2f: per-type gate + freshness re-check of each source page
 python -m applyflow supply --consultancies --saas --fintech-seeds --fintech   # 2g: seed lists (only seeds not in the pool)
 python -m applyflow supply --yc-fintech-india       # 2g: YC fintechs abroad with an office / engineering in India
-python -m applyflow mark-replied <email> --outcome {interested,declined_warm,declined,auto_ack} [--recheck D] [--contact "Name <email>"] [--role R]
+python -m applyflow mark-replied <email> --outcome {interested,declined_warm,declined,auto_ack} [--recheck D] [--contact "Name <email>"] [--role R] [--keep-followup]
+python -m applyflow gmail-login        # 3: OAuth (gmail.send + gmail.readonly), token in config/private/
+python -m applyflow reconcile [--from 2026-10-21 --to 2026-10-29] [--release] [--no-inbox]
+python -m applyflow plan [--date D] [--no-fresh]      # 3: next working day: 30 new + follow-ups (<=15) + retries
+python -m applyflow send [--dry-run] [--to-self --limit N] [--no-fresh]
+python -m applyflow check-inbox [--since D]
+python -m applyflow digest [--print] [--date D]
+python -m applyflow drop <row|email|target id> [--date D] ; hold <date> [--undo] ; pause ; resume ; summary [--date D]
 pytest
 ```
 
@@ -557,6 +565,86 @@ Open points:
 3. 8 hello@ addresses at consultancy / SaaS / fintech companies have no draft: the batch rule only sends hello@ at
    startups of 50 or fewer.
 4. Careers-page role matching is still a text heuristic; check role emails' titles in the review screen.
+
+## Phase 3 notes (Gmail sending engine, built 2026-11-01)
+
+- **Modules**: `gmail.py` (OAuth via google-auth / google-auth-oauthlib, REST through `AuthorizedSession` - no Google
+  API client library; MIME; message parsing; error classes), `followups.py`, `inbox.py` (check-inbox, reconcile),
+  `sending.py` (window, lock, brakes, plan, send, drop / hold, digest, review page, summary). New tables in
+  `store.py`: `gmail_messages` (every email of ours with Gmail / thread / Message-ID, source engine | reconcile),
+  `send_plan` (a day's rows: new | followup | retry, status planned | sending | sent | failed | dropped | deferred |
+  moved | held), `inbox_messages`, `brakes`, `plan_holds`, `app_state`; `outreach_events.keep_followup`.
+  Follow-up sends are `followup` events, soft-bounce resends `retried`: neither counts in `send_records` / gates.
+- **Private files** (gitignored via `config/private/`): `gmail_credentials.json` (Desktop OAuth client),
+  `gmail_token.json`, the resume PDF (`outreach.sending.resume_pdf`, default the one `*Resume*.pdf` there), `PAUSE`.
+- **plan**: `make_queue` unchanged except `carry` (rows deferred / held / left planned on an earlier day go first,
+  their old row becomes `moved`) and `skip` (rows dropped in review). Short of 30 -> "short by N" (stored in
+  `app_state` as `short:<day>` for the digest). Follow-ups and retries fill up to `daily_ceiling` (45). Writes
+  `output/review/plan_<day>.html` and `output/digest/digest_<day>.txt`.
+- **send**: rows go `planned -> sending` (attempt counted) before the API call and `sent` right after (gmail id,
+  thread id, Message-ID fetched for threading; `sent` event with kind, batch_date = day). A row left `sending` by a
+  crash is looked up in Sent (recipient + subject) before anything else: found -> recorded, else back to planned.
+  `data/send.lock` (O_EXCL, stale after 5 h). Window (`SendWindow`): waits for 09:00; a run starting by 09:15 is on
+  time and stops at 10:45; later is a late start and may send until 13:00; starting after 13:00 defers all. Gaps:
+  random 2-4 min, shortened (never below 2) to finish by 10:30 (12:45 late). Deferred new rows leave that day's
+  `send_queue` (else `held_earlier` would trap them). Before each new email: still ready, same address, DNC,
+  validated draft, the 2f freshness check. Resume: `attach` drafts get the PDF and must not contain the resume
+  link; `link` drafts must not say "attached". `--to-self` sends to the account with "[TEST] ", ignores the window,
+  marks nothing; `--dry-run` sends nothing and changes nothing (both use the next planned day if today has none).
+- **Brakes**: PAUSE flag; `auth` brake (401 / invalid_grant / missing token) until `gmail-login` clears it; `abuse`
+  brake (403, 429 after back-off, any quota / rate-limit / abuse wording) and `bounces` brake (`bounce_brake` 3 hard
+  bounces received that IST day) for that day. Any brake defers the rest of the day's rows. 5xx after back-off
+  (5 / 20 / 60 s) stops the run leaving rows planned (rerun continues). `resume` clears PAUSE + today's abuse / bounce
+  brakes.
+- **check-inbox** (`after:<last check> -in:sent -in:drafts -in:chats`, each message once via `inbox_messages`):
+  DSN (mailer-daemon / postmaster / multipart/report) -> Status 5.x.x or "address not found" wording = hard
+  (bounced + stopped events, skipped if already recorded); 4.x.x / "(Delay)" / Action: delayed = soft (resent once
+  the next working day as a `retry` row; the follow-up waits for it and then replies to the retry); no status =
+  `bounce_unclear` (digest only). Auto-reply: Auto-Submitted != no, X-Autoreply / X-Autorespond, Precedence
+  auto_reply / bulk / junk, no-reply senders, automated wording; a subject alone ("Thank you for your email") isn't
+  enough, so "Thanks for reaching out, no openings" stays human. "A person will get back to you" without ATS signs
+  (conditional "if your profile matches", portals, do-not-reply) -> `keep_followup`. Human -> `needs_action`
+  outcome (new constant, accepted by `mark_replied`), replier stored as a reply contact; the digest lists it until
+  `mark-replied` records the real outcome. Matching: our thread, else a sent address / its domain or a parent
+  domain (careers.robo.example -> robo.example); mailings (List-Unsubscribe / List-Id) are `other`. Drive access
+  requests (drive-shares-*noreply@google.com) are listed. Nothing is ever replied to.
+- **Follow-ups** (`due_followups`): due `followup_after_working_days` (5) Mon-Fri after the delivered message's
+  IST date, never before `followups_not_before` (2026-11-02); oldest first, `followups_per_day` (15); one per
+  target (a sent / sending / dropped follow-up row or message ends it). Not for: bounced, stopped, DNC, any human
+  outcome (interested / declined_warm / declined / needs_action) at that company (company_id), ATS auto_ack, or a
+  target with no Gmail record (needs `reconcile`). `OutreachItem.followups_stopped` is now False for auto_ack with
+  keep_followup. Text: 3 variants by crc32(target id); greeting / company / role (role emails) / the original's
+  first observation sentence (full, cut at its first clause, or none) to land in 50-70 words, padded with "Thank
+  you for your time either way." if short; variant 1 says "my email from last week" only when the delivered message
+  went out 5-9 calendar days before the follow-up day (`earlier_phrase`), else "my earlier email";
+  `validate_followup` (Re: subject, greeting, 50-70 words, exactly one question, no pushy wording, no placeholders,
+  "last week" only at 5-9 days, phone / LinkedIn / GitHub in the signature, no attachment).
+  Threaded: threadId + In-Reply-To / References = the original's Message-ID; no attachment; resume link signature.
+- **reconcile**: every `send_queue` row in the date range without a `new` Gmail record: `in:sent to:<addr>` from 2
+  days before to 12 after the batch date; exact subject wins, else a single non-"Re:" message to that address
+  ("subject differs"). Unmarked rows are marked sent on the real IST send date (batch_date kept); already-marked
+  rows keep their date (a difference is noted). Not found -> listed; `--release` removes unmarked ones from their
+  old batch so `plan` can pick them. Then one inbox scan from the start date.
+- **Digest** (`build_digest`): brakes ("run gmail-login"), held day, short by N, the plan's rows (company, address,
+  name, kind, new / follow-up / retry), human replies needing action with Gmail thread links and a snippet, bounces /
+  auto-replies / Drive requests since the last digest (`app_state.last_digest`), the Recheck list, supply
+  (`supply_summary`: days at 30/day and full days). `digest` emails it to the authorised account.
+- **Scheduling**: `scripts/schedule_tasks.ps1` (not run by Claude): `\ApplyFlow\` tasks via cmd.exe with
+  PYTHONIOENCODING=utf-8, appending to `data/logs/<command>.log`: plan+digest 20:00 Sun-Thu, send 09:00 Mon-Fri
+  (WakeToRun, StartWhenAvailable, 4 h limit, IgnoreNew), check-inbox 11:00 / 15:00 / 19:45 daily.
+  `scripts/remove_tasks.ps1` removes them. Times are the PC clock: it must be on IST.
+- **Recorded 2026-11-01**: Accelerize 360 and Codelattice marked sent 2026-10-29 (their 29 Oct batch rows were
+  unmarked), then Accelerize declined_warm (Priyanka Kapoor <pkapoor@accelerize360.com>, HR, recheck 2027-01-05)
+  and Codelattice auto_ack with keep_followup. DB backup before Phase 3: `data/applyflow.pre3.db`.
+- Smoke run on a copy of the live DB (2026-11-01): `plan --date 2026-11-02 --no-fresh` -> 30 new (all hiring
+  inboxes), 0 follow-ups (107 sent originals need `reconcile` first); supply 99 sendable = 15 days, 1 full.
+
+Open points:
+1. **Not live yet**: gmail-login, reconcile, the to-self test and scheduling are for the user to run.
+2. Soft bounces: Gmail itself retries 4.x.x for ~2 days; our one resend the next working day may duplicate a late
+   delivery. Revisit with real data.
+3. The resume link is a Drive link: Drive access requests in the digest mean it isn't shared "anyone with the link".
+4. Follow-up variants share wording across all targets; replies by variant (Phase 4) would show which works.
 
 ## Calibration backlog
 

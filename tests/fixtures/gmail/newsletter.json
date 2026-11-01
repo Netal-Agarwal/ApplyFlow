@@ -1,0 +1,51 @@
+{
+  "id": "18f0a1b2c3d4e5fa",
+  "threadId": "thr-news-10",
+  "labelIds": [
+    "INBOX",
+    "UNREAD"
+  ],
+  "snippet": "",
+  "sizeEstimate": 4000,
+  "historyId": "123456",
+  "internalDate": "1793596200000",
+  "payload": {
+    "partId": "0",
+    "mimeType": "text/plain",
+    "filename": "",
+    "headers": [
+      {
+        "name": "From",
+        "value": "Hydra <news@hydra.example>"
+      },
+      {
+        "name": "To",
+        "value": "me@example.com"
+      },
+      {
+        "name": "Subject",
+        "value": "Hydra product update: November"
+      },
+      {
+        "name": "List-Unsubscribe",
+        "value": "<https://hydra.example/unsub>"
+      },
+      {
+        "name": "Precedence",
+        "value": "bulk"
+      },
+      {
+        "name": "Content-Type",
+        "value": "text/plain; charset=UTF-8"
+      },
+      {
+        "name": "Content-Type",
+        "value": "text/plain; charset=\"UTF-8\""
+      }
+    ],
+    "body": {
+      "size": 30,
+      "data": "TmV3IHRoaXMgbW9udGg6IGZhc3RlciBzeW5jcy4K"
+    }
+  }
+}

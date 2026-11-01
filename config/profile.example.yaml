@@ -315,6 +315,16 @@ outreach:
     max_bounce_rate: 0.05  # bounces / sends at or above this pauses tier 3
   min_words: 160           # draft length, counted between the greeting and the sign-off
   max_words: 200
+  # Phase 3: the Gmail sending engine (defaults in applyflow/config.py; times are IST)
+  # sending:
+  #   new_per_day: 30
+  #   followups_per_day: 15
+  #   daily_ceiling: 45
+  #   window_start: "09:00"
+  #   window_end: "10:30"
+  #   hard_stop: "10:45"
+  #   late_until: "13:00"
+  #   resume_pdf: ""        # '' = the one *Resume*.pdf in config/private/
 
 # ---------------------------------------------------------------------------
 # Contacts (Phase 2a): who to email at each target company.

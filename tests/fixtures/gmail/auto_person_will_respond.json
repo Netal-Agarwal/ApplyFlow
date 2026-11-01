@@ -1,0 +1,55 @@
+{
+  "id": "18f0a1b2c3d4e5f5",
+  "threadId": "thr-orig-5",
+  "labelIds": [
+    "INBOX",
+    "UNREAD"
+  ],
+  "snippet": "",
+  "sizeEstimate": 4000,
+  "historyId": "123456",
+  "internalDate": "1793593200000",
+  "payload": {
+    "partId": "0",
+    "mimeType": "text/plain",
+    "filename": "",
+    "headers": [
+      {
+        "name": "From",
+        "value": "Codelab HR <hr@codelab.example>"
+      },
+      {
+        "name": "To",
+        "value": "Your Name <me@example.com>"
+      },
+      {
+        "name": "Subject",
+        "value": "Re: January 2027 intern or 2027 new grad at Codelab?"
+      },
+      {
+        "name": "In-Reply-To",
+        "value": "<CAorig5@mail.gmail.com>"
+      },
+      {
+        "name": "X-Autoreply",
+        "value": "yes"
+      },
+      {
+        "name": "Auto-Submitted",
+        "value": "auto-replied"
+      },
+      {
+        "name": "Content-Type",
+        "value": "text/plain; charset=UTF-8"
+      },
+      {
+        "name": "Content-Type",
+        "value": "text/plain; charset=\"UTF-8\""
+      }
+    ],
+    "body": {
+      "size": 147,
+      "data": "VGhhbmsgeW91IGZvciB3cml0aW5nIHRvIENvZGVsYWIuIFdlIGhhdmUgcmVjZWl2ZWQgeW91ciBlbWFpbCBhbmQgb25lIG9mIG91ciB0ZWFtIG1lbWJlcnMgd2lsbCBnZXQgYmFjayB0byB5b3Ugc2hvcnRseS4KClJlZ2FyZHMsCkhSIFRlYW0sIENvZGVsYWIK"
+    }
+  }
+}

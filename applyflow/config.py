@@ -22,6 +22,8 @@ DO_NOT_CONTACT_PATH = CONFIG_DIR / "do_not_contact.txt"
 DRAFTS_DIR = ROOT / "output" / "drafts"
 DEFAULT_DB_PATH = ROOT / "data" / "applyflow.db"
 OUTPUT_DIR = ROOT / "output"
+PRIVATE_DIR = CONFIG_DIR / "private"           # gitignored: Gmail credentials and token, resume, PAUSE flag
+LOG_DIR = ROOT / "data" / "logs"
 
 SUPPORTED_ATS = ("greenhouse", "lever", "ashby", "workable")
 SKILL_WEIGHTS = {"heavy": 3, "medium": 2, "light": 1, "negative": -3}
@@ -68,6 +70,23 @@ DEFAULT_OUTREACH = {
     "require_written_draft": False,    # 2f: queue only targets whose draft is a validated Claude draft
     "min_words": 160,                  # draft length between the greeting and the sign-off (2d format)
     "max_words": 200,
+    # Phase 3: the Gmail sending engine (times are IST, HH:MM)
+    "sending": {
+        "new_per_day": 30,             # `plan`: new emails per working day
+        "followups_per_day": 15,       # `plan`: follow-ups per day, oldest first
+        "daily_ceiling": 45,           # hard limit on emails sent in one day (new + follow-ups + retries)
+        "window_start": "09:00",
+        "window_end": "10:30",         # gaps aim to finish the batch by here...
+        "hard_stop": "10:45",          # ...and nothing goes out after this on an on-time start
+        "on_time_until": "09:15",      # a run starting later is a late start (laptop asleep)...
+        "late_until": "13:00",         # ...and may send until here; what's left moves to the next working day
+        "gap_minutes": [2, 4],         # random gap between two sends
+        "followup_after_working_days": 5,
+        "followups_not_before": "2026-11-02",
+        "followup_words": [50, 70],
+        "bounce_brake": 3,             # hard bounces in one day (all types) that stop sending for the day
+        "resume_pdf": "",              # '' = the one *Resume*.pdf in config/private/
+    },
 }
 DEFAULT_DISCOVERY = {
     "recheck_days": 30,
@@ -276,6 +295,7 @@ def _outreach(raw: dict[str, Any]) -> dict[str, Any]:
     out = {**DEFAULT_OUTREACH, **raw}
     out["tier3"] = {**DEFAULT_OUTREACH["tier3"], **(raw.get("tier3") or {})}
     out["type_gates"] = {**DEFAULT_OUTREACH["type_gates"], **(raw.get("type_gates") or {})}
+    out["sending"] = {**DEFAULT_OUTREACH["sending"], **(raw.get("sending") or {})}
     return out
 
 

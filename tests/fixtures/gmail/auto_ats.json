@@ -1,0 +1,51 @@
+{
+  "id": "18f0a1b2c3d4e5f4",
+  "threadId": "thr-ats-4",
+  "labelIds": [
+    "INBOX",
+    "UNREAD"
+  ],
+  "snippet": "",
+  "sizeEstimate": 4000,
+  "historyId": "123456",
+  "internalDate": "1793592600000",
+  "payload": {
+    "partId": "0",
+    "mimeType": "text/plain",
+    "filename": "",
+    "headers": [
+      {
+        "name": "From",
+        "value": "Robo Careers <no-reply@careers.robo.example>"
+      },
+      {
+        "name": "To",
+        "value": "me@example.com"
+      },
+      {
+        "name": "Subject",
+        "value": "Thank you for your interest in Robo"
+      },
+      {
+        "name": "Auto-Submitted",
+        "value": "auto-generated"
+      },
+      {
+        "name": "Precedence",
+        "value": "bulk"
+      },
+      {
+        "name": "Content-Type",
+        "value": "text/plain; charset=UTF-8"
+      },
+      {
+        "name": "Content-Type",
+        "value": "text/plain; charset=\"UTF-8\""
+      }
+    ],
+    "body": {
+      "size": 255,
+      "data": "RGVhciBDYW5kaWRhdGUsCgpUaGFuayB5b3UgZm9yIGFwcGx5aW5nIHRvIFJvYm8uIFdlIGhhdmUgcmVjZWl2ZWQgeW91ciBhcHBsaWNhdGlvbi4gSWYgeW91ciBwcm9maWxlIG1hdGNoZXMgb3VyIGN1cnJlbnQgcmVxdWlyZW1lbnRzLCBvdXIgdGFsZW50IHRlYW0gd2lsbCBnZXQgaW4gdG91Y2ggd2l0aCB5b3UuCgpUaGlzIGlzIGFuIGF1dG9tYXRlZCBtZXNzYWdlLCBwbGVhc2UgZG8gbm90IHJlcGx5IHRvIHRoaXMgZW1haWwuCgpUZWFtIFJvYm8K"
+    }
+  }
+}

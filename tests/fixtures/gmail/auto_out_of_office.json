@@ -1,0 +1,51 @@
+{
+  "id": "18f0a1b2c3d4e5f6",
+  "threadId": "thr-orig-6",
+  "labelIds": [
+    "INBOX",
+    "UNREAD"
+  ],
+  "snippet": "",
+  "sizeEstimate": 4000,
+  "historyId": "123456",
+  "internalDate": "1793593800000",
+  "payload": {
+    "partId": "0",
+    "mimeType": "text/plain",
+    "filename": "",
+    "headers": [
+      {
+        "name": "From",
+        "value": "Priya Sharma <priya@nimbus.example>"
+      },
+      {
+        "name": "To",
+        "value": "me@example.com"
+      },
+      {
+        "name": "Subject",
+        "value": "Automatic reply: Backend Engineer Intern - Your Name"
+      },
+      {
+        "name": "Auto-Submitted",
+        "value": "auto-replied"
+      },
+      {
+        "name": "X-Auto-Response-Suppress",
+        "value": "All"
+      },
+      {
+        "name": "Content-Type",
+        "value": "text/plain; charset=UTF-8"
+      },
+      {
+        "name": "Content-Type",
+        "value": "text/plain; charset=\"UTF-8\""
+      }
+    ],
+    "body": {
+      "size": 65,
+      "data": "SSdtIG91dCBvZiBvZmZpY2UgdW50aWwgOSBOb3ZlbWJlciB3aXRoIGxpbWl0ZWQgYWNjZXNzIHRvIGVtYWlsLgo"
+    }
+  }
+}

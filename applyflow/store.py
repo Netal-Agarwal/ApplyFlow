@@ -256,6 +256,71 @@ CREATE TABLE IF NOT EXISTS collection_runs (
     job_count   INTEGER,
     error       TEXT
 );
+
+CREATE TABLE IF NOT EXISTS gmail_messages (    -- Phase 3: every email of ours sent through (or found in) Gmail
+    gmail_id    TEXT PRIMARY KEY,
+    thread_id   TEXT NOT NULL,
+    rfc_id      TEXT,                          -- the Message-ID header (In-Reply-To / References of a follow-up)
+    target_id   TEXT NOT NULL,
+    email       TEXT NOT NULL,
+    row_type    TEXT NOT NULL,                 -- new | followup | retry
+    subject     TEXT,
+    sent_at     TEXT NOT NULL,                 -- ISO, UTC
+    batch_date  TEXT,
+    source      TEXT NOT NULL                  -- engine | reconcile (sent by hand, found in the Sent folder)
+);
+CREATE INDEX IF NOT EXISTS idx_gmail_target ON gmail_messages(target_id);
+CREATE INDEX IF NOT EXISTS idx_gmail_thread ON gmail_messages(thread_id);
+
+CREATE TABLE IF NOT EXISTS send_plan (         -- Phase 3: a working day's rows and their send state (idempotency)
+    batch_date  TEXT NOT NULL,
+    position    INTEGER NOT NULL,
+    target_id   TEXT NOT NULL,
+    email       TEXT NOT NULL,
+    row_type    TEXT NOT NULL,                 -- new | followup | retry
+    status      TEXT NOT NULL,                 -- planned | sending | sent | failed | dropped | deferred | held
+    gmail_id    TEXT,
+    thread_id   TEXT,
+    sent_at     TEXT,
+    error       TEXT,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (batch_date, target_id, row_type)
+);
+
+CREATE TABLE IF NOT EXISTS inbox_messages (    -- Phase 3: check-inbox, one row per message looked at
+    gmail_id    TEXT PRIMARY KEY,
+    thread_id   TEXT,
+    received_at TEXT,                          -- ISO, UTC
+    sender      TEXT,
+    subject     TEXT,
+    category    TEXT NOT NULL,                 -- hard_bounce | soft_bounce | bounce_unclear | auto_reply |
+                                               -- human_reply | drive_request | other
+    target_id   TEXT,
+    email       TEXT,                          -- the address of ours it concerns (bounced / replied-to)
+    detail      TEXT,                          -- status code, "human will respond", snippet ...
+    applied     TEXT,                          -- what was recorded for it
+    checked_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS brakes (            -- Phase 3: sending stopped (a day, or until gmail-login for auth)
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    day         TEXT NOT NULL,                 -- YYYY-MM-DD (IST)
+    kind        TEXT NOT NULL,                 -- auth | abuse | bounces
+    reason      TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    cleared_at  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS plan_holds (        -- Phase 3: `hold <date>`: nothing is planned or sent that day
+    day         TEXT PRIMARY KEY,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_state (         -- Phase 3: last inbox check, last digest
+    key         TEXT PRIMARY KEY,
+    value       TEXT
+);
 """
 
 
@@ -307,7 +372,8 @@ class Store:
                                      ("jobs", "poster", "TEXT"), ("contacts", "proof", "TEXT"),
                                      ("manual_targets", "role_seen", "TEXT"), ("contacts", "evidence", "TEXT"),
                                      ("outreach_events", "kind", "TEXT"), ("outreach_events", "outcome", "TEXT"),
-                                     ("outreach_events", "recheck_date", "TEXT"), ("outreach_events", "note", "TEXT")):
+                                     ("outreach_events", "recheck_date", "TEXT"), ("outreach_events", "note", "TEXT"),
+                                     ("outreach_events", "keep_followup", "INTEGER")):
             cols = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
@@ -686,13 +752,14 @@ class Store:
 
     def add_event(self, target_id: str, company_key: str, email: str, event: str, event_date: str,
                   batch_date: str = "", send_tier: int | None = None, kind: str = "", outcome: str = "",
-                  recheck_date: str = "", note: str = "") -> None:
+                  recheck_date: str = "", note: str = "", keep_followup: bool = False) -> None:
         with self.conn:
             self.conn.execute(
                 "INSERT INTO outreach_events (target_id, company_key, email, event, event_date, batch_date, "
-                "recorded_at, send_tier, kind, outcome, recheck_date, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "recorded_at, send_tier, kind, outcome, recheck_date, note, keep_followup) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (target_id, company_key, email.lower(), event, event_date, batch_date, _now(), send_tier, kind,
-                 outcome, recheck_date, note))
+                 outcome, recheck_date, note, int(keep_followup)))
 
     def add_reply_contact(self, company_key: str, company: str, name: str, role: str, email: str,
                           source_url: str) -> None:
@@ -737,6 +804,124 @@ class Store:
 
     def draft_rules(self) -> dict[str, str]:
         return {r["target_id"]: r["rules"] for r in self.conn.execute("SELECT * FROM draft_rules")}
+
+    def remove_from_queue(self, batch_date: str, target_id: str) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM send_queue WHERE batch_date = ? AND target_id = ?", (batch_date, target_id))
+
+    # -- Phase 3: Gmail sending engine -------------------------------------------------
+
+    def save_gmail_message(self, gmail_id: str, thread_id: str, target_id: str, email: str, row_type: str,
+                           subject: str, sent_at: str, batch_date: str = "", source: str = "engine",
+                           rfc_id: str = "") -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO gmail_messages (gmail_id, thread_id, rfc_id, target_id, email, row_type, subject, sent_at, "
+                "batch_date, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(gmail_id) DO UPDATE SET "
+                "rfc_id = COALESCE(NULLIF(excluded.rfc_id, ''), gmail_messages.rfc_id)",
+                (gmail_id, thread_id, rfc_id, target_id, email.lower(), row_type, subject, sent_at, batch_date, source))
+
+    def set_message_rfc_id(self, gmail_id: str, rfc_id: str) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE gmail_messages SET rfc_id = ? WHERE gmail_id = ?", (rfc_id, gmail_id))
+
+    def gmail_messages(self, target_id: str | None = None) -> list[sqlite3.Row]:
+        if target_id is None:
+            return self.conn.execute("SELECT * FROM gmail_messages ORDER BY sent_at").fetchall()
+        return self.conn.execute("SELECT * FROM gmail_messages WHERE target_id = ? ORDER BY sent_at",
+                                 (target_id,)).fetchall()
+
+    def save_plan(self, batch_date: str, rows: list[tuple[str, str, str]]) -> None:
+        """Replace a day's not-yet-sent plan rows with rows of (target_id, email, row_type). Rows already sent,
+        sending (an interrupted send, resolved by `send`) or dropped in review are kept as they are."""
+        now = _now()
+        with self.conn:
+            kept = self.conn.execute("SELECT target_id, row_type FROM send_plan WHERE batch_date = ? AND status IN "
+                                     "('sent', 'sending', 'dropped')", (batch_date,)).fetchall()
+            keep = {(r[0], r[1]) for r in kept}
+            self.conn.execute("DELETE FROM send_plan WHERE batch_date = ? AND status NOT IN ('sent', 'sending', "
+                              "'dropped')", (batch_date,))
+            pos = len(keep)
+            for target_id, email, row_type in rows:
+                if (target_id, row_type) in keep:
+                    continue
+                pos += 1
+                self.conn.execute("INSERT INTO send_plan (batch_date, position, target_id, email, row_type, status, "
+                                  "updated_at) VALUES (?, ?, ?, ?, ?, 'planned', ?)",
+                                  (batch_date, pos, target_id, email.lower(), row_type, now))
+
+    def plan_rows(self, batch_date: str | None = None, status: str | None = None) -> list[sqlite3.Row]:
+        cond, args = [], []
+        if batch_date:
+            cond.append("batch_date = ?")
+            args.append(batch_date)
+        if status:
+            cond.append("status = ?")
+            args.append(status)
+        where = ("WHERE " + " AND ".join(cond)) if cond else ""
+        return self.conn.execute(f"SELECT * FROM send_plan {where} ORDER BY batch_date, position", args).fetchall()
+
+    def set_plan_status(self, batch_date: str, target_id: str, row_type: str, status: str, error: str = "",
+                        gmail_id: str = "", thread_id: str = "", sent_at: str = "", attempt: bool = False) -> None:
+        with self.conn:
+            self.conn.execute(
+                "UPDATE send_plan SET status = ?, error = ?, gmail_id = COALESCE(NULLIF(?, ''), gmail_id), "
+                "thread_id = COALESCE(NULLIF(?, ''), thread_id), sent_at = COALESCE(NULLIF(?, ''), sent_at), "
+                "attempts = attempts + ?, updated_at = ? WHERE batch_date = ? AND target_id = ? AND row_type = ?",
+                (status, error, gmail_id, thread_id, sent_at, int(attempt), _now(), batch_date, target_id, row_type))
+
+    def save_inbox_message(self, row: dict) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO inbox_messages (gmail_id, thread_id, received_at, sender, subject, category, target_id, "
+                "email, detail, applied, checked_at) VALUES (:gmail_id, :thread_id, :received_at, :sender, :subject, "
+                ":category, :target_id, :email, :detail, :applied, :checked_at) ON CONFLICT(gmail_id) DO NOTHING",
+                {"checked_at": _now(), **row})
+
+    def inbox_messages(self, since: str = "", category: str | None = None) -> list[sqlite3.Row]:
+        cond, args = "WHERE received_at >= ?", [since]
+        if category:
+            cond += " AND category = ?"
+            args.append(category)
+        return self.conn.execute(f"SELECT * FROM inbox_messages {cond} ORDER BY received_at", args).fetchall()
+
+    def seen_inbox_ids(self) -> set[str]:
+        return {r[0] for r in self.conn.execute("SELECT gmail_id FROM inbox_messages")}
+
+    def add_brake(self, day: str, kind: str, reason: str) -> None:
+        with self.conn:
+            if not self.conn.execute("SELECT 1 FROM brakes WHERE day = ? AND kind = ? AND cleared_at IS NULL",
+                                     (day, kind)).fetchone():
+                self.conn.execute("INSERT INTO brakes (day, kind, reason, created_at) VALUES (?, ?, ?, ?)",
+                                  (day, kind, reason, _now()))
+
+    def brakes(self, day: str | None = None) -> list[sqlite3.Row]:
+        """Brakes in force: every uncleared auth brake, and the day's other ones."""
+        return self.conn.execute("SELECT * FROM brakes WHERE cleared_at IS NULL AND (kind = 'auth' OR day = ?) "
+                                 "ORDER BY id", (day or "",)).fetchall()
+
+    def clear_brakes(self, kind: str) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE brakes SET cleared_at = ? WHERE kind = ? AND cleared_at IS NULL", (_now(), kind))
+
+    def set_hold(self, day: str, on: bool = True) -> None:
+        with self.conn:
+            if on:
+                self.conn.execute("INSERT OR IGNORE INTO plan_holds (day, created_at) VALUES (?, ?)", (day, _now()))
+            else:
+                self.conn.execute("DELETE FROM plan_holds WHERE day = ?", (day,))
+
+    def held_days(self) -> set[str]:
+        return {r[0] for r in self.conn.execute("SELECT day FROM plan_holds")}
+
+    def get_state(self, key: str, default: str = "") -> str:
+        row = self.conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+        return row[0] if row and row[0] is not None else default
+
+    def set_state(self, key: str, value: str) -> None:
+        with self.conn:
+            self.conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET "
+                              "value = excluded.value", (key, value))
 
     # -- outreach pool (Phase 2c) ------------------------------------------------
 

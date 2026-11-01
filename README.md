@@ -19,7 +19,7 @@ startup openings higher.
 |---|---|---|
 | **1. Discovery & scoring** | Discover hiring startups; collect openings from ATS job boards and HN; filter and rank them against your profile; export a report | ✅ This release |
 | 2. Contacts & drafting | Find the right hiring contact; research the company; draft a personalized email per target; send-ready report with today's batch | ✅ |
-| 3. Sending & follow-ups | Gmail API sending with ramped daily caps, reply detection, automatic follow-ups, do-not-contact list | Planned |
+| 3. Sending & follow-ups | Gmail API sending in a morning window with daily caps and brakes, bounce / reply detection, one threaded follow-up, evening digest | ✅ |
 | 4. Insights | Reply and interview rates by source, tier and template; more sources | Planned |
 
 ## Quick start
@@ -69,6 +69,50 @@ companies, about 3-5 minutes), and `run` daily (a minute or two).
 | `python -m applyflow mark-sent <id>` / `--batch YYYY-MM-DD` | Record emails you sent (ApplyFlow never sends) |
 | `python -m applyflow mark-bounced <id>` | Record a bounce; the next alternate or backup address is suggested |
 | `python -m applyflow add-target "Co" --website co.com [--note] [--email] [--name] [--role]` | Add your own target; finds a contact unless you give an email |
+| `python -m applyflow gmail-login` | Phase 3: authorise Gmail (`gmail.send` + `gmail.readonly`) in your browser; token in `config/private/` |
+| `python -m applyflow reconcile [--from D --to D] [--release]` | Find the batches you sent by hand in your Sent folder; record Gmail ids and real send times; mark unmarked rows; scan the inbox once |
+| `python -m applyflow plan [--date D]` | Build the next working day's batch (30 new + follow-ups due, up to 15), the review page and the digest |
+| `python -m applyflow send [--dry-run] [--to-self --limit N]` | Send today's plan: random 2-4 min gaps from 09:00 IST, nothing after 10:45 (13:00 after a late start) |
+| `python -m applyflow check-inbox [--since D]` | Classify new mail: hard / soft bounce, auto-reply, human reply, Drive access request; apply the outcome |
+| `python -m applyflow digest [--print]` | Email yourself the evening digest (tomorrow's rows, replies to answer, bounces, brake, supply) |
+| `python -m applyflow drop <row\|email> [--date D]` / `hold <date> [--undo]` | Review: drop one planned row / skip a whole day |
+| `python -m applyflow pause` / `resume` | Stop / restart all sending (`config/private/PAUSE`) |
+| `python -m applyflow summary [--date D]` | Today's sends, bounces by type, replies by outcome, follow-ups due, brake, supply left |
+
+## Sending from Gmail (Phase 3, Windows)
+
+ApplyFlow sends from your own Gmail through the Gmail API. It can send and read mail, never delete or label it.
+
+1. **Google Cloud project** (free): create a project, enable the *Gmail API*, set up the OAuth consent screen
+   (External, Testing mode, add your Gmail as a test user), then create an OAuth client of type *Desktop app* and
+   download its JSON to `config\private\gmail_credentials.json` (gitignored). In Testing mode the token can expire
+   after about a week: the digest and the console then say "run gmail-login".
+2. Install the two Google auth libraries and log in (a browser opens; allow both permissions):
+   ```
+   .venv\Scripts\pip install -r requirements.txt
+   .venv\Scripts\python -m applyflow gmail-login
+   ```
+3. Reconcile what you sent by hand (21-29 Oct by default). Rows it can't find are listed; add `--release` to let
+   `plan` pick them again.
+   ```
+   .venv\Scripts\python -m applyflow reconcile
+   ```
+4. Plan a day, read the review page (`output\review\plan_<date>.html`) and send a test to yourself (marks nothing):
+   ```
+   .venv\Scripts\python -m applyflow plan
+   .venv\Scripts\python -m applyflow send --dry-run
+   .venv\Scripts\python -m applyflow send --to-self --limit 2
+   ```
+5. Schedule it (creates tasks under *Task Scheduler Library > ApplyFlow*; logs in `data\logs\`):
+   ```
+   powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1
+   ```
+   `plan` + `digest` at 20:00 Sun-Thu, `send` at 09:00 Mon-Fri (wakes the PC, runs late if it was asleep),
+   `check-inbox` at 11:00, 15:00 and 19:45. Allow wake timers in Power Options. `scripts\remove_tasks.ps1` removes
+   them; `python -m applyflow pause` stops sending without removing anything.
+
+Every plan sends as planned unless you `drop` rows or `hold` the day after reading the digest. Brakes stop a day's
+sending on 3+ hard bounces, any 403 / quota / abuse error, or an expired login; 45 sends a day is a hard ceiling.
 
 ## How it works
 
@@ -192,7 +236,8 @@ slug you've seen in their careers URL: `probe "Acme" --slug acmehq`.
 - **Polite collection.** Honest User-Agent, at most one request per second per host,
   backoff on rate limits. Public job-board APIs only; company websites are read only
   where `robots.txt` allows.
-- **A human approves outreach.** Nothing will be sent without review (Phases 2-3).
+- **A human approves outreach.** Drafts are reviewed before they're queued, and each evening's digest lists the
+  next day's rows so you can drop or hold them. Replies are never answered automatically.
 
 ## Development
 
@@ -211,7 +256,11 @@ applyflow/
   config.py          profile and seed loading
   detect.py          find a company's job board from its website
   discovery.py       YC directory discovery
+  followups.py       Phase 3: follow-up eligibility, the three variants, validator
+  gmail.py           Phase 3: Gmail OAuth, REST client, MIME, message parsing
   http.py            polite HTTP client (rate limits, retries, robots.txt)
+  inbox.py           Phase 3: check-inbox (bounce / auto-reply / human / Drive) and reconcile
+  sending.py         Phase 3: plan, send window, brakes, lock, digest, review, summary
   models.py          Job, Company, ScoreResult
   pipeline.py        collect / score / probe orchestration
   report.py          HTML and CSV export
@@ -220,5 +269,9 @@ applyflow/
 config/
   profile.example.yaml
   seeds.yaml
+  private/           gitignored: gmail_credentials.json, gmail_token.json, resume PDF, PAUSE
+scripts/
+  schedule_tasks.ps1 Windows Task Scheduler tasks (plan+digest, send, check-inbox)
+  remove_tasks.ps1
 tests/
 ```

@@ -33,8 +33,15 @@
     python -m applyflow guess-evidence   # 2f: which stored guesses are backed by evidence (offline)
     python -m applyflow classify-published [--apply]   # 2f: "other" published addresses: hiring or not
     python -m applyflow referrals        # 2f: output/referrals.csv for large / apply-only companies
+    python -m applyflow gmail-login      # 3: authorise Gmail (gmail.send + gmail.readonly)
+    python -m applyflow reconcile        # 3: match the hand-sent batches to the Sent folder; scan the inbox once
+    python -m applyflow plan [--date D]  # 3: next working day's batch (30 new + follow-ups), review page, digest
+    python -m applyflow send [--dry-run | --to-self --limit N]   # 3: send today's plan in the 09:00-10:45 IST window
+    python -m applyflow check-inbox      # 3: bounces / auto-replies / human replies / Drive requests -> outcomes
+    python -m applyflow digest           # 3: email yourself the evening digest
+    python -m applyflow drop <row|email> / hold <date> / pause / resume / summary   # 3: review and brakes
 
-ApplyFlow never sends email: you send from Gmail and record it here.
+Phase 3 sends through the Gmail API (`send`); before it, you sent from Gmail and recorded it with mark-sent.
 """
 
 from __future__ import annotations
@@ -709,13 +716,276 @@ def cmd_mark_replied(args, profile, store) -> int:
     from applyflow.outreach import OUTCOME_LABELS, OutreachError, mark_replied, parse_day
     try:
         it = mark_replied(store, profile, args.email, args.outcome, parse_day(args.date), args.recheck or "",
-                          args.contact or "", args.role or "", _dnc())
+                          args.contact or "", args.role or "", _dnc(), keep_followup=args.keep_followup)
     except OutreachError as exc:
         print(f"error: {exc}")
         return 1
     print(f"Reply recorded for {it.target_id} ({it.sent_email}): {OUTCOME_LABELS[it.outcome]}"
-          + (f", recheck {it.recheck}" if it.recheck else "") + "; follow-ups stopped."
+          + (f", recheck {it.recheck}" if it.recheck else "")
+          + ("; follow-ups stopped." if it.followups_stopped else "; a person will respond: follow-up kept.")
           + (f" Stored {it.replied_by} as a verified named person (source: the reply)." if it.replied_by else ""))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: the Gmail sending engine
+# ---------------------------------------------------------------------------
+
+GMAIL_CREDENTIALS = config.PRIVATE_DIR / "gmail_credentials.json"
+GMAIL_TOKEN = config.PRIVATE_DIR / "gmail_token.json"
+
+
+def _stamp(command: str) -> None:
+    """A header line per run: scheduled runs append to data/logs/<command>.log."""
+    from applyflow.sending import now_ist
+    print(f"=== {command} {now_ist():%Y-%m-%d %H:%M:%S} IST ===")
+
+
+def _gmail(store):
+    """The Gmail client, or None after triggering the auth brake (shown in the digest and here)."""
+    from applyflow.gmail import GmailAuthError, GmailClient
+    from applyflow.sending import now_ist, trigger_brake
+    try:
+        return GmailClient.from_token(GMAIL_TOKEN)
+    except GmailAuthError as exc:
+        trigger_brake(store, now_ist().date(), "auth", str(exc))
+        print("Gmail login needed: run `python -m applyflow gmail-login`.")
+        return None
+
+
+def cmd_gmail_login(args, profile, store) -> int:
+    from applyflow.gmail import GmailAuthError, gmail_login
+    try:
+        address = gmail_login(GMAIL_CREDENTIALS, GMAIL_TOKEN)
+    except GmailAuthError as exc:
+        print(f"error: {exc}")
+        return 1
+    store.clear_brakes("auth")
+    want = ((profile.candidate or {}).get("email") or "").lower()
+    print(f"Authorised {address}; token saved to {GMAIL_TOKEN} (gitignored). Auth brake cleared.")
+    if want and address.lower() != want:
+        print(f"warning: profile.yaml candidate.email is {want}, but you signed in as {address}.")
+    return 0
+
+
+def _print_lines(title: str, lines: list[str], limit: int = 80) -> None:
+    if lines:
+        print(f"{title} ({len(lines)}):")
+        for ln in lines[:limit]:
+            print(f"  {ln}")
+        if len(lines) > limit:
+            print(f"  ... {len(lines) - limit} more")
+
+
+def _print_inbox(res) -> None:
+    print(f"Inbox: {res.looked_at} new message(s): " + (", ".join(f"{k} {v}" for k, v in sorted(res.by_category.items()))
+                                                       or "nothing to classify"))
+    _print_lines("Applied", res.applied)
+    _print_lines("Human replies needing your action", res.needs_action)
+    if res.brake:
+        print(f"BRAKE: {res.brake}")
+
+
+def cmd_reconcile(args, profile, store) -> int:
+    from applyflow.gmail import GmailAuthError, GmailError
+    from applyflow.inbox import reconcile
+    from applyflow.outreach import parse_day
+    from applyflow.sending import now_ist, trigger_brake
+    _stamp("reconcile")
+    gmail = _gmail(store)
+    if gmail is None:
+        return 1
+    try:
+        res = reconcile(store, profile, gmail, parse_day(args.start), parse_day(args.end), _dnc(), args.release,
+                        now=now_ist(), scan_inbox=not args.no_inbox)
+    except GmailAuthError as exc:
+        trigger_brake(store, now_ist().date(), "auth", str(exc))
+        return 1
+    except GmailError as exc:
+        print(f"error: Gmail: {exc}")
+        return 1
+    print(f"Found in Sent: {len(res.found)}; newly marked sent: {len(res.marked)}; not found: {len(res.missing)}.")
+    _print_lines("Newly marked sent", res.marked)
+    _print_lines("Not found in Sent (not marked)", res.missing)
+    _print_lines("Released from their old batch", res.released)
+    _print_lines("Notes", res.notes)
+    if res.missing and not args.release:
+        print("Rows not found stay in their old batch (never planned again) until you run reconcile --release.")
+    if res.inbox is not None:
+        _print_inbox(res.inbox)
+    return 0
+
+
+def cmd_plan(args, profile, store) -> int:
+    from applyflow.followups import next_working_day
+    from applyflow.outreach import Freshness, parse_day
+    from applyflow.sending import now_ist, plan_day
+    _stamp("plan")
+    day = parse_day(args.date) if args.date else next_working_day(now_ist().date())
+    fresh = None if args.no_fresh else Freshness(_client(profile, args.min_interval), store, day, log=print)
+    res = plan_day(store, profile, day, fresh, _dnc())
+    if res.held:
+        print(f"{res.day} is held; nothing planned. Digest: {res.digest_path}")
+        return 0
+    print(f"Plan for {res.day}: {len(res.new)} new, {len(res.followups)} follow-up(s), {len(res.retries)} retry(ies)"
+          + (f" ({res.already_sent} already sent today)" if res.already_sent else ""))
+    if res.short:
+        print(f"SHORT BY {res.short}: fewer than {profile.outreach['sending']['new_per_day']} new rows pass the caps "
+              "and gates.")
+    if res.carried:
+        print(f"Carried over from an earlier day: {len(res.carried)}")
+    for i, it in enumerate(res.new, start=1):
+        a = it.address
+        print(f"  {i:>2}. {it.company[:26]:<26} {a.email:<36} {a.kind}")
+    for f in res.followups:
+        print(f"  fu. {f.item.company[:26]:<26} {f.item.sent_email:<36} variant {f.variant + 1}, sent "
+              f"{f.item.sent_date}")
+    for it in res.retries:
+        print(f"  re. {it.company[:26]:<26} {it.sent_email:<36} soft-bounce retry")
+    if res.followup_skips:
+        print("Follow-ups not planned: " + ", ".join(f"{k} {v}" for k, v in sorted(res.followup_skips.items())))
+    if res.batch is not None and res.batch.fresh:
+        gone = [c for c in res.batch.fresh if c.status == "gone"]
+        print(f"Freshness: {len(res.batch.fresh) - len(gone)} checked ok/unchecked, {len(gone)} dropped.")
+    print(f"Review: {res.review_path}\nDigest: {res.digest_path}")
+    return 0
+
+
+def cmd_send(args, profile, store) -> int:
+    from applyflow.outreach import Freshness
+    from applyflow.sending import LockBusy, brake_reasons, now_ist, send_day
+    _stamp("send" + (" --dry-run" if args.dry_run else " --to-self" if args.to_self else ""))
+    if args.limit is not None and not (args.dry_run or args.to_self):
+        print("error: --limit goes with --to-self or --dry-run")
+        return 2
+    if args.dry_run:
+        reasons = brake_reasons(store, now_ist().date())
+        if reasons:
+            print("Brake in force (a real run would stop): " + "; ".join(reasons))
+    gmail = None if args.dry_run else _gmail(store)
+    if gmail is None and not args.dry_run:
+        return 1
+    fresh = None if (args.no_fresh or args.dry_run or args.to_self) else \
+        Freshness(_client(profile, args.min_interval), store, now_ist().date(), log=print)
+    try:
+        res = send_day(store, profile, gmail, fresh=fresh, dnc=_dnc(), dry_run=args.dry_run, to_self=args.to_self,
+                       limit=args.limit)
+    except LockBusy as exc:
+        print(f"error: {exc}")
+        return 1
+    if res.recovered:
+        _print_lines("Interrupted rows found in Sent", res.recovered)
+    if args.dry_run:
+        _print_lines("Would send", res.would)
+    else:
+        print(f"Sent {len(res.sent)}" + (" test email(s) to yourself; nothing marked" if args.to_self else "") + ".")
+        _print_lines("Sent", res.sent)
+    _print_lines("Dropped (not sendable now)", res.dropped)
+    _print_lines("Failed", res.failed)
+    _print_lines("Deferred to the next working day", res.deferred)
+    if res.stopped:
+        print(f"Stopped: {res.stopped}")
+    return 0 if not res.stopped or res.sent else 1
+
+
+def cmd_check_inbox(args, profile, store) -> int:
+    from datetime import datetime, time as dtime
+    from applyflow.gmail import GmailAuthError, GmailError
+    from applyflow.inbox import IST, check_inbox
+    from applyflow.outreach import parse_day
+    from applyflow.sending import now_ist, trigger_brake
+    _stamp("check-inbox")
+    gmail = _gmail(store)
+    if gmail is None:
+        return 1
+    since = datetime.combine(parse_day(args.since), dtime(0, 0), tzinfo=IST) if args.since else None
+    try:
+        res = check_inbox(store, profile, gmail, now_ist(), since=since, dnc=_dnc())
+    except GmailAuthError as exc:
+        trigger_brake(store, now_ist().date(), "auth", str(exc))
+        return 1
+    except GmailError as exc:
+        print(f"error: Gmail: {exc}")
+        return 1
+    _print_inbox(res)
+    return 0
+
+
+def cmd_digest(args, profile, store) -> int:
+    from applyflow.gmail import GmailAuthError, GmailError
+    from applyflow.sending import DIGEST_DIR, build_digest, now_ist, send_digest, trigger_brake, upcoming_day
+    _stamp("digest")
+    now = now_ist()
+    day = args.date or upcoming_day(store, now.date(), after=True)
+    if args.print_only:
+        short = int(store.get_state(f"short:{day}", "0") or 0)
+        subject, text = build_digest(store, profile, day, now, short, _dnc())
+        print(f"Subject: {subject}\n\n{text}")
+        return 0
+    gmail = _gmail(store)
+    if gmail is None:
+        short = int(store.get_state(f"short:{day}", "0") or 0)
+        subject, text = build_digest(store, profile, day, now, short, _dnc())
+        print(f"Couldn't email the digest. Subject: {subject}\n\n{text}")
+        return 1
+    try:
+        subject, text = send_digest(store, profile, gmail, day, now, _dnc())
+    except GmailAuthError as exc:
+        trigger_brake(store, now.date(), "auth", str(exc))
+        return 1
+    except GmailError as exc:
+        print(f"error: Gmail: {exc}")
+        return 1
+    DIGEST_DIR.mkdir(parents=True, exist_ok=True)
+    (DIGEST_DIR / f"digest_{day}.txt").write_text(f"Subject: {subject}\n\n{text}", encoding="utf-8")
+    print(f"Digest emailed: {subject}")
+    return 0
+
+
+def cmd_drop(args, profile, store) -> int:
+    from applyflow.sending import drop, now_ist, upcoming_day
+    day = args.date or upcoming_day(store, now_ist().date())
+    try:
+        print(drop(store, args.ref, day))
+    except ValueError as exc:
+        print(f"error: {exc}")
+        return 1
+    return 0
+
+
+def cmd_hold(args, profile, store) -> int:
+    from applyflow.outreach import OutreachError, parse_day
+    from applyflow.sending import hold
+    try:
+        day = parse_day(args.date).isoformat()
+    except OutreachError as exc:
+        print(f"error: {exc}")
+        return 2
+    print(hold(store, day, args.undo))
+    return 0
+
+
+def cmd_pause(args, profile, store) -> int:
+    from applyflow.sending import PAUSE_PATH, pause
+    pause()
+    print(f"Paused: {PAUSE_PATH} exists; `send` sends nothing until `resume`.")
+    return 0
+
+
+def cmd_resume(args, profile, store) -> int:
+    from applyflow.sending import brake_reasons, now_ist, resume
+    done = resume(store)
+    print("; ".join(done) if done else "Nothing to resume.")
+    left = brake_reasons(store, now_ist().date())
+    if left:
+        print("Still in force: " + "; ".join(left))
+    return 0
+
+
+def cmd_summary(args, profile, store) -> int:
+    from applyflow.outreach import parse_day
+    from applyflow.sending import summary
+    print(summary(store, profile, parse_day(args.date), _dnc()))
     return 0
 
 
@@ -954,7 +1224,50 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--contact", help='"Name <email>": the person who replied, stored as a verified named person')
     p.add_argument("--role", help="the replier's role, if known (e.g. HR, Founder)")
     p.add_argument("--date", help="YYYY-MM-DD the reply came (default today)")
+    p.add_argument("--keep-followup", action="store_true",
+                   help="auto_ack only: the auto-reply says a person will respond, so the follow-up stays due")
     p.set_defaults(func=cmd_mark_replied)
+
+    # -- Phase 3: Gmail sending engine --
+    sub.add_parser("gmail-login", help="3: authorise Gmail (gmail.send + gmail.readonly) in your browser"
+                   ).set_defaults(func=cmd_gmail_login)
+    p = sub.add_parser("reconcile", help="3: find the batches you sent by hand in Sent; mark them; scan the inbox once")
+    p.add_argument("--from", dest="start", default="2026-10-21", help="first batch date (default 2026-10-21)")
+    p.add_argument("--to", dest="end", default="2026-10-29", help="last batch date (default 2026-10-29)")
+    p.add_argument("--release", action="store_true",
+                   help="take rows not found in Sent (and not marked sent) out of their old batch so `plan` can pick them")
+    p.add_argument("--no-inbox", action="store_true", help="skip the inbox scan")
+    p.set_defaults(func=cmd_reconcile)
+    p = sub.add_parser("plan", help="3: build a working day's batch (30 new + follow-ups due), review page and digest")
+    p.add_argument("--date", help="YYYY-MM-DD (default: the next working day)")
+    p.add_argument("--no-fresh", action="store_true", help="skip the freshness re-check of each source page")
+    p.set_defaults(func=cmd_plan)
+    p = sub.add_parser("send", help="3: send today's planned rows through Gmail (09:00-10:45 IST, late start to 13:00)")
+    p.add_argument("--dry-run", action="store_true", help="show what would be sent; send nothing, change nothing")
+    p.add_argument("--to-self", action="store_true", help="send the planned rows to yourself with [TEST]; marks nothing")
+    p.add_argument("--limit", type=int, help="at most this many rows (with --to-self or --dry-run)")
+    p.add_argument("--no-fresh", action="store_true", help="skip the freshness re-check before each new email")
+    p.set_defaults(func=cmd_send)
+    p = sub.add_parser("check-inbox", help="3: classify new mail (bounce / auto-reply / human / Drive) and apply it")
+    p.add_argument("--since", help="YYYY-MM-DD: look from this day instead of the last check")
+    p.set_defaults(func=cmd_check_inbox)
+    p = sub.add_parser("digest", help="3: email yourself the digest for the next plan (or print it with --print)")
+    p.add_argument("--date", help="the plan day it covers (default: the next day with planned rows)")
+    p.add_argument("--print", dest="print_only", action="store_true", help="print it; send nothing")
+    p.set_defaults(func=cmd_digest)
+    p = sub.add_parser("drop", help="3: drop a planned row (its number, address or target id)")
+    p.add_argument("ref")
+    p.add_argument("--date", help="the plan day (default: the next day with planned rows)")
+    p.set_defaults(func=cmd_drop)
+    p = sub.add_parser("hold", help="3: skip a whole day (nothing planned or sent); --undo to lift it")
+    p.add_argument("date")
+    p.add_argument("--undo", action="store_true")
+    p.set_defaults(func=cmd_hold)
+    sub.add_parser("pause", help="3: stop all sending (config/private/PAUSE)").set_defaults(func=cmd_pause)
+    sub.add_parser("resume", help="3: remove PAUSE and today's abuse / bounce brakes").set_defaults(func=cmd_resume)
+    p = sub.add_parser("summary", help="3: today's sends, bounces by type, replies, follow-ups due, brake, supply")
+    p.add_argument("--date", help="YYYY-MM-DD (default today)")
+    p.set_defaults(func=cmd_summary)
 
     p = sub.add_parser("add-target", help="add a company of your own as an outreach target")
     p.add_argument("company")

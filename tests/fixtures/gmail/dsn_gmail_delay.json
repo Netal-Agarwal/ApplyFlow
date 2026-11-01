@@ -1,0 +1,74 @@
+{
+  "id": "18f0a1b2c3d4e5f2",
+  "threadId": "thr-orig-2",
+  "labelIds": [
+    "INBOX",
+    "UNREAD"
+  ],
+  "snippet": "",
+  "sizeEstimate": 4000,
+  "historyId": "123456",
+  "internalDate": "1793595000000",
+  "payload": {
+    "partId": "",
+    "mimeType": "multipart/report",
+    "filename": "",
+    "body": {
+      "size": 0
+    },
+    "parts": [
+      {
+        "partId": "0",
+        "mimeType": "text/plain",
+        "filename": "",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "text/plain; charset=\"UTF-8\""
+          }
+        ],
+        "body": {
+          "size": 252,
+          "data": "KiogTWVzc2FnZSBub3QgZGVsaXZlcmVkIHlldCAqKg0KDQpUaGVyZSB3YXMgYSB0ZW1wb3JhcnkgcHJvYmxlbSBkZWxpdmVyaW5nIHlvdXIgbWVzc2FnZSB0byBqb2JzQHNsb3dteC5leGFtcGxlLiBHbWFpbCB3aWxsIHJldHJ5IGZvciA0NiBtb3JlIGhvdXJzLiBZb3UnbGwgYmUgbm90aWZpZWQgaWYgdGhlIGRlbGl2ZXJ5IGZhaWxzIHBlcm1hbmVudGx5Lg0KDQpUaGUgcmVzcG9uc2Ugd2FzOg0KNDUxIDQuNC4xIFRyeSBhZ2FpbiBsYXRlcg0K"
+        }
+      },
+      {
+        "partId": "1",
+        "mimeType": "message/delivery-status",
+        "filename": "",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "message/delivery-status"
+          }
+        ],
+        "body": {
+          "size": 173,
+          "data": "UmVwb3J0aW5nLU1UQTogZG5zOyBnb29nbGVtYWlsLmNvbQ0KDQpGaW5hbC1SZWNpcGllbnQ6IHJmYzgyMjsgam9ic0BzbG93bXguZXhhbXBsZQ0KQWN0aW9uOiBkZWxheWVkDQpTdGF0dXM6IDQuNC4xDQpXaWxsLVJldHJ5LVVudGlsOiBXZWQsIDA0IE5vdiAyMDI2IDAwOjAwOjAwIC0wODAwIChQU1QpDQo"
+        }
+      }
+    ],
+    "headers": [
+      {
+        "name": "From",
+        "value": "Mail Delivery Subsystem <mailer-daemon@googlemail.com>"
+      },
+      {
+        "name": "To",
+        "value": "me@example.com"
+      },
+      {
+        "name": "Subject",
+        "value": "Delivery Status Notification (Delay)"
+      },
+      {
+        "name": "Auto-Submitted",
+        "value": "auto-replied"
+      },
+      {
+        "name": "Content-Type",
+        "value": "multipart/report; boundary=\"x\"; report-type=delivery-status"
+      }
+    ]
+  }
+}

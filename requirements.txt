@@ -1,2 +1,4 @@
 requests>=2.31
 PyYAML>=6.0
+google-auth>=2.20          # Phase 3: Gmail OAuth (official, free)
+google-auth-oauthlib>=1.0

@@ -61,7 +61,10 @@ KIND_ORDER = {"role": 0, "manual": 1, "general_outreach": 2}
 # back in the report's Recheck list on their recheck date.
 OUTCOMES = ("interested", "declined_warm", "declined", "auto_ack")
 OUTCOME_LABELS = {"interested": "replied: interested", "declined_warm": "replied: not now, stay in touch",
-                  "declined": "replied: declined", "auto_ack": "automatic acknowledgement (delivered)"}
+                  "declined": "replied: declined", "auto_ack": "automatic acknowledgement (delivered)",
+                  "needs_action": "human reply: needs your action"}
+# Phase 3: check-inbox records a human reply as needs_action until you record its real outcome with mark-replied.
+NEEDS_ACTION = "needs_action"
 # 2g: after `mark-bounced --stop`, only these can reopen a target - never another guess.
 REOPEN_KINDS = ("verified_person", "hiring_inbox")
 
@@ -274,11 +277,13 @@ class OutreachItem:
     outcome_date: str = ""
     recheck: str = ""                          # 2g: YYYY-MM-DD when a declined_warm target is looked at again
     replied_by: str = ""                       # 2g: "Name <email>" of the person who replied, if any
+    keep_followup: bool = False                # 3: an auto-reply saying a person will respond (follow-up still due)
 
     @property
     def followups_stopped(self) -> bool:
-        """2g: a recorded reply (any outcome, auto-acknowledgements included) ends the follow-up sequence."""
-        return bool(self.outcome)
+        """2g: a recorded reply (any outcome, auto-acknowledgements included) ends the follow-up sequence - except
+        (Phase 3) an auto-reply from a small company saying a person will respond."""
+        return bool(self.outcome) and not (self.outcome == "auto_ack" and self.keep_followup)
 
     @property
     def guess_rank(self) -> int:
@@ -518,8 +523,10 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
             r = replies[-1]
             item.outcome, item.outcome_date = r["outcome"] or "", r["event_date"]
             item.recheck, item.replied_by = r["recheck_date"] or "", r["note"] or ""
+            item.keep_followup = bool(r["keep_followup"])
             item.status_note = f"{OUTCOME_LABELS.get(item.outcome, item.outcome)} {item.outcome_date}" + \
-                (f"; recheck {item.recheck}" if item.recheck else "") + "; no follow-ups"
+                (f"; recheck {item.recheck}" if item.recheck else "") + \
+                ("; a person will respond, follow-up kept" if not item.followups_stopped else "; no follow-ups")
         item.why = _why(check, inputs, kind)
         item.manual_links = _links(item)
         from applyflow.supply import sector_for
@@ -1054,23 +1061,37 @@ class Freshness:
 
 
 def make_queue(store, profile: Profile, day: date, size: int | None = None, dnc: DoNotContact | None = None,
-               save: bool = True, fresh: Freshness | None = None) -> Batch:
+               save: bool = True, fresh: Freshness | None = None, carry: list[str] | None = None,
+               skip: set[str] | None = None) -> Batch:
     """Pick (and store) a day's batch. Entries of that day already marked sent stay in it; targets waiting in
     an earlier day's stored batch are left for that day. With `fresh` (2f), every picked address is re-checked on
-    its source page first; a dropped one is replaced by the next pick, until the batch is stable."""
-    items = refresh_drafts(store, profile, dnc) if save else build_items(store, profile, dnc, day=day)
+    its source page first; a dropped one is replaced by the next pick, until the batch is stable.
+    Phase 3: `carry` target ids (rows deferred from an earlier day) go first while still ready; `skip` ids are
+    never picked (rows dropped in review)."""
+    skip = skip or set()
+
+    def build():
+        built = refresh_drafts(store, profile, dnc) if save else build_items(store, profile, dnc, day=day)
+        return [it for it in built if it.target_id not in skip]
+
+    items = build()
     mark_queued(store, items)
     size = int(size or profile.outreach["daily_batch"])
     by_id = {it.target_id: it for it in items}
     sent_today = [by_id[r["target_id"]] for r in store.queue(day.isoformat())
                   if r["target_id"] in by_id and by_id[r["target_id"]].status == "sent"
                   and by_id[r["target_id"]].sent_date == day.isoformat()]
+
+    def carried() -> list[OutreachItem]:
+        out = [by_id[t] for t in carry or [] if t in by_id and by_id[t].status == "ready" and by_id[t].address
+               and not (by_id[t].queued_on and by_id[t].queued_on < day.isoformat())]
+        return out[:max(0, size - len(sent_today))]
     gates = type_gates(send_records(store), day, profile.outreach)
     gates["_rules"] = batch_rules(profile.outreach)
     checked: set[str] = set()
     while True:
         batch = pick_batch(items, day, size, store.send_history(day.isoformat()), profile.outreach["tier3"],
-                           sent_today, general_cap=_general_cap(profile), gates=gates)
+                           sent_today + carried(), general_cap=_general_cap(profile), gates=gates)
         if fresh is None:
             break
         stale = [it for it in batch.items if it.status == "ready" and it.target_id not in checked
@@ -1078,7 +1099,7 @@ def make_queue(store, profile: Profile, day: date, size: int | None = None, dnc:
         checked |= {it.target_id for it in batch.items}
         if not stale:
             break
-        items = refresh_drafts(store, profile, dnc) if save else build_items(store, profile, dnc, day=day)
+        items = build()
         mark_queued(store, items)
         by_id = {it.target_id: it for it in items}
         sent_today = [by_id[t.target_id] for t in sent_today if t.target_id in by_id]
@@ -1214,11 +1235,12 @@ def parse_contact(text: str) -> tuple[str, str]:
 
 
 def mark_replied(store, profile: Profile, email: str, outcome: str, day: date, recheck: str = "", contact: str = "",
-                 role: str = "", dnc: DoNotContact | None = None) -> OutreachItem:
+                 role: str = "", dnc: DoNotContact | None = None, keep_followup: bool = False) -> OutreachItem:
     """2g: record a reply to a sent email. Every outcome stops follow-ups; auto_ack also counts as delivered;
     declined_warm needs a recheck date (the report lists it again then). `contact` ("Name <email>") is stored as a
-    verified named person (source: the reply), kept across re-lookups."""
-    if outcome not in OUTCOMES:
+    verified named person (source: the reply), kept across re-lookups. Phase 3: an auto_ack with `keep_followup`
+    (a small company's auto-reply saying a person will respond) keeps its follow-up."""
+    if outcome not in OUTCOMES + (NEEDS_ACTION,):
         raise OutreachError(f"outcome must be one of {', '.join(OUTCOMES)}")
     if recheck:
         recheck = parse_day(recheck).isoformat()
@@ -1233,7 +1255,7 @@ def mark_replied(store, profile: Profile, email: str, outcome: str, day: date, r
         store.add_reply_contact(it.company_key, it.company, name, role, addr, f"reply to {it.sent_email}")
         who = f"{name} <{addr}>"
     store.add_event(it.target_id, it.company_key, it.sent_email, "replied", day.isoformat(), outcome=outcome,
-                    recheck_date=recheck, note=who)
+                    recheck_date=recheck, note=who, keep_followup=keep_followup and outcome == "auto_ack")
     items = refresh_drafts(store, profile, dnc)
     return next(i for i in items if i.target_id == it.target_id)
 
