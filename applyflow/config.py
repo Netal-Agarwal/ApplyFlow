@@ -63,11 +63,12 @@ DEFAULT_OUTREACH = {
         "evidence_guess_per_day": 10,  # evidence-backed guesses per day
         "day_bounces_pause": 2,        # evidence guesses / hello@: this many bounces in one day pause the type
                                        # the next day (and the same day, once recorded)
-        "hiring_window": 20,           # hiring inboxes: paused when hiring_max_bounces of the last
-        "hiring_max_bounces": 3,       # hiring_window hiring-inbox sends bounced
+        "hiring_window": 50,           # hiring inboxes: paused when more than hiring_max_bounce_rate of the last
+        "hiring_max_bounce_rate": 0.10,  # hiring_window hiring-inbox sends bounced (was 3 of 20 until 2026-11-02)
         "general_inbox_max_team": None,  # hello@ only at startups (sector) of at most this many people (unknown ok)
     },
     "require_written_draft": False,    # 2f: queue only targets whose draft is a validated Claude draft
+    "require_company_fit": True,       # 2026-11-03: India team or remote-India hiring, and a software / tech company
     "min_words": 160,                  # draft length between the greeting and the sign-off (2d format)
     "max_words": 200,
     # Phase 3: the Gmail sending engine (times are IST, HH:MM)
@@ -84,7 +85,8 @@ DEFAULT_OUTREACH = {
         "followup_after_working_days": 5,
         "followups_not_before": "2026-11-02",
         "followup_words": [50, 70],
-        "bounce_brake": 3,             # hard bounces in one day (all types) that stop sending for the day
+        "bounce_brake": 4,             # hard bounces in one day (all types) that stop sending for the day...
+        "bounce_brake_rate": 0.12,     # ...or more than this share of that day's sends
         "resume_pdf": "",              # '' = the one *Resume*.pdf in config/private/
     },
 }

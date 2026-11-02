@@ -637,6 +637,9 @@ def cmd_queue(args, profile, store) -> int:
         print(f"error: {exc}")
         return 2
     from applyflow.outreach import Freshness
+    if store.plan_rows(day.isoformat()):
+        print(f"error: {day.isoformat()} is an engine day (`plan` stored its rows); use `plan`, or `hold` it first")
+        return 1
     fresh = None if args.no_fresh else Freshness(_client(profile, args.min_interval), store, day, log=print)
     if fresh is not None:
         print("Freshness check (2f): re-reading each picked address's source page...")
@@ -796,7 +799,8 @@ def cmd_reconcile(args, profile, store) -> int:
     if gmail is None:
         return 1
     try:
-        res = reconcile(store, profile, gmail, parse_day(args.start), parse_day(args.end), _dnc(), args.release,
+        end = parse_day(args.end) if args.end else now_ist().date()
+        res = reconcile(store, profile, gmail, parse_day(args.start), end, _dnc(), args.release,
                         now=now_ist(), scan_inbox=not args.no_inbox)
     except GmailAuthError as exc:
         trigger_brake(store, now_ist().date(), "auth", str(exc))
@@ -822,8 +826,13 @@ def cmd_plan(args, profile, store) -> int:
     from applyflow.sending import now_ist, plan_day
     _stamp("plan")
     day = parse_day(args.date) if args.date else next_working_day(now_ist().date())
+    from applyflow.sending import HandSentDay
     fresh = None if args.no_fresh else Freshness(_client(profile, args.min_interval), store, day, log=print)
-    res = plan_day(store, profile, day, fresh, _dnc())
+    try:
+        res = plan_day(store, profile, day, fresh, _dnc())
+    except HandSentDay as exc:
+        print(f"error: {exc}")
+        return 1
     if res.held:
         print(f"{res.day} is held; nothing planned. Digest: {res.digest_path}")
         return 0
@@ -986,6 +995,54 @@ def cmd_summary(args, profile, store) -> int:
     from applyflow.outreach import parse_day
     from applyflow.sending import summary
     print(summary(store, profile, parse_day(args.date), _dnc()))
+    return 0
+
+
+def cmd_daily(args, profile, store) -> int:
+    """Manual sending: mark a day's batch (and its follow-up checklist) sent, build the next batch, write the files."""
+    from applyflow.manual import KIND_LABELS, daily
+    from applyflow.outreach import Freshness, OutreachError, parse_day
+    try:
+        sent_day = parse_day(args.sent)
+        next_day = parse_day(args.next) if args.next else None
+    except OutreachError as exc:
+        print(f"error: {exc}")
+        return 2
+    factory = None if args.no_fresh else (lambda d: Freshness(_client(profile, args.min_interval), store, d, log=print))
+    res = daily(store, profile, sent_day, next_day, tuple(args.skip or ()), tuple(args.skip_followup or ()),
+                args.followups, factory, _dnc(), args.force)
+    print(f"Backup: {res.backup}")
+    print(f"Marked sent from {res.sent_day}: {len(res.marked)}" + (f" (skipped {', '.join(res.skipped)})"
+                                                                  if res.skipped else ""))
+    if res.followups_marked:
+        print(f"Follow-ups marked sent on {res.sent_day}: {len(res.followups_marked)}")
+    print(f"Daily brake on {res.sent_day}: {res.brake or 'not tripped'}")
+    for note in res.notes:
+        print(f"note: {note}")
+    if not res.batch_path:
+        return 1 if res.brake else 0
+    print(f"\nBatch for {res.next_day}: {len(res.rows)} row(s)")
+    print(f"{'#':>3}  {'Company':<26} {'Sector':<11} {'Email':<36} {'Type':<15} {'Kind':<8} Attach")
+    for o in res.rows:
+        if "company" in o:
+            print(f"{o['n']:>3}  {o['company'][:26]:<26} {o['sector']:<11} {o['email']:<36} "
+                  f"{KIND_LABELS.get(o['kind'], o['kind'])[:15]:<15} {o['rg']:<8} {'yes' if o['attach'] else 'no'}")
+    bad = [o for o in res.rows if o["problems"]]
+    print(f"Rows with problems: {len(bad)}" + "".join(f"\n  {o.get('company', o['tid'])}: {'; '.join(o['problems'])}"
+                                                     for o in bad))
+    b = res.batch
+    for kind, g in b.gates.items():
+        if not kind.startswith("_") and (g.state == "paused" or b.held_by_kind.get(kind)):
+            print(f"  gate {kind}: {g.reason} ({b.held_by_kind.get(kind, 0)} held)")
+    if b.fresh:
+        gone = sum(c.status == "gone" for c in b.fresh)
+        print(f"Freshness: {len(b.fresh) - gone} kept, {gone} dropped")
+    if len(res.rows) < int(profile.outreach["daily_batch"]):
+        print(f"SHORT BY {int(profile.outreach['daily_batch']) - len(res.rows)}")
+    print(f"\nFollow-ups for {res.next_day}: {len(res.followups)} -> {res.followups_path}")
+    print(f"Batch file: {res.batch_path}")
+    report = argparse.Namespace(out=str(config.OUTPUT_DIR), min_tier="B", date=res.next_day)
+    cmd_report(report, profile, store)
     return 0
 
 
@@ -1228,12 +1285,24 @@ def build_parser() -> argparse.ArgumentParser:
                    help="auto_ack only: the auto-reply says a person will respond, so the follow-up stays due")
     p.set_defaults(func=cmd_mark_replied)
 
-    # -- Phase 3: Gmail sending engine --
+    p = sub.add_parser("daily", help="manual sending: mark a day's batch + follow-ups sent, build the next batch, "
+                                     "write batch_<next>.md, followups_<next>.md and the report")
+    p.add_argument("--sent", required=True, help="YYYY-MM-DD of the batch you sent by hand")
+    p.add_argument("--next", help="the day to build (default: the next working day)")
+    p.add_argument("--skip", action="append", metavar="TARGET_ID", help="a row of that batch you didn't send")
+    p.add_argument("--skip-followup", action="append", metavar="TARGET_ID",
+                   help="a checklist follow-up you didn't send")
+    p.add_argument("--followups", type=int, default=10, help="follow-ups in the next checklist (default 10)")
+    p.add_argument("--no-fresh", action="store_true", help="skip the freshness re-check of each source page")
+    p.add_argument("--force", action="store_true", help="build the next batch even if the daily brake tripped")
+    p.set_defaults(func=cmd_daily)
+
+    # -- Phase 3: Gmail sending engine (kept, not used: sending is manual since 2026-11-02) --
     sub.add_parser("gmail-login", help="3: authorise Gmail (gmail.send + gmail.readonly) in your browser"
                    ).set_defaults(func=cmd_gmail_login)
     p = sub.add_parser("reconcile", help="3: find the batches you sent by hand in Sent; mark them; scan the inbox once")
     p.add_argument("--from", dest="start", default="2026-10-21", help="first batch date (default 2026-10-21)")
-    p.add_argument("--to", dest="end", default="2026-10-29", help="last batch date (default 2026-10-29)")
+    p.add_argument("--to", dest="end", default=None, help="last batch date (default today)")
     p.add_argument("--release", action="store_true",
                    help="take rows not found in Sent (and not marked sent) out of their old batch so `plan` can pick them")
     p.add_argument("--no-inbox", action="store_true", help="skip the inbox scan")

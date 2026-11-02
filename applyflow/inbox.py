@@ -298,11 +298,12 @@ def check_inbox(store, profile, gmail, now: datetime, since: datetime | None = N
     if changed:
         refresh_drafts(store, profile, dnc)
     today = ist_day(now)
-    limit = int(profile.outreach["sending"]["bounce_brake"])
+    from applyflow.sending import day_brake, sends_on
     hard_today = [r for r in store.inbox_messages(category="hard_bounce")
                   if r["received_at"] and ist_day(datetime.fromisoformat(r["received_at"])) == today]
-    if len(hard_today) >= limit:
-        res.brake = f"{len(hard_today)} hard bounces today (brake at {limit}): sending stopped for {today.isoformat()}"
+    why = day_brake(len(hard_today), sends_on(store, today), profile.outreach["sending"])
+    if why:
+        res.brake = f"{why}: sending stopped for {today.isoformat()}"
         store.add_brake(today.isoformat(), "bounces", res.brake)
     store.set_state("inbox_last_check", now.isoformat())
     return res

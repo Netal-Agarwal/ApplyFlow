@@ -10,7 +10,8 @@
           Gmail ids) right after it, under a lock file, so no row goes out twice - a row left `sending` by a crash
           is looked up in the Sent folder before anything else happens.
   brakes  config/private/PAUSE (pause / resume); auth errors (until gmail-login), 403 / abuse / quota errors and
-          `bounce_brake` hard bounces in a day (that day). A hard ceiling of `daily_ceiling` sends a day.
+          `bounce_brake` (4) hard bounces in a day or more than `bounce_brake_rate` (12%) of its sends (that day).
+          A hard ceiling of `daily_ceiling` sends a day.
 """
 
 from __future__ import annotations
@@ -112,6 +113,24 @@ def brake_reasons(store, day: date, pause_path: Path = PAUSE_PATH) -> list[str]:
     return out
 
 
+def day_brake(hard: int, sends: int, cfg: dict) -> str:
+    """The all-type daily brake: `bounce_brake` (4) or more hard bounces in a day, or more than `bounce_brake_rate`
+    (12%) of that day's sends; '' when it doesn't trip."""
+    most, rate = int(cfg["bounce_brake"]), float(cfg["bounce_brake_rate"])
+    if hard >= most:
+        return f"{hard} hard bounces in one day (brake at {most})"
+    if sends and hard / sends > rate:
+        return f"{hard} hard bounces of {sends} sends in one day ({hard / sends:.0%} > {rate:.0%})"
+    return ""
+
+
+def sends_on(store, day: date) -> int:
+    """Emails sent on `day` (IST): new sends, follow-ups and retries, by hand or through the engine."""
+    d = day.isoformat()
+    events = sum(1 for e in store.events() if e["event"] in ("sent", "followup", "retried") and e["event_date"] == d)
+    return max(events, _sends_on(store, day))
+
+
 def trigger_brake(store, day: date, kind: str, reason: str, log: Log = print) -> None:
     store.add_brake(day.isoformat(), kind, reason)
     log(f"BRAKE ({kind}): {reason}" + (" -> run gmail-login" if kind == "auth" else ""))
@@ -192,6 +211,15 @@ class PlanResult:
     digest_path: Path | None = None
 
 
+class HandSentDay(ValueError):
+    pass
+
+
+def hand_sent_day(store, day: str) -> bool:
+    """A day whose batch `queue` stored (sent by hand from Gmail) - send_queue rows and no engine plan rows."""
+    return bool(store.queue(day)) and not store.plan_rows(day)
+
+
 def due_retries(store, items: list, day: date) -> list:
     """Soft-bounced originals to send once more: the bounce arrived before `day` (next working day or later), the
     target is still sent and unanswered, no hard bounce since, and no retry yet."""
@@ -217,6 +245,9 @@ def plan_day(store, profile, day: date, fresh=None, dnc=None, log: Log = print) 
     from applyflow.outreach import build_items, make_queue
     cfg = profile.outreach["sending"]
     res = PlanResult(day=day.isoformat())
+    if hand_sent_day(store, day.isoformat()):
+        raise HandSentDay(f"{day.isoformat()} already has a batch stored by `queue` (sent by hand from Gmail): the "
+                          "engine never plans or sends it; `reconcile` records it")
     if day.isoformat() in store.held_days():
         res.held = True
         store.save_plan(day.isoformat(), [])
@@ -434,6 +465,9 @@ def send_day(store, profile, gmail, clock: Callable[[], datetime] = now_ist,
             return res
         if day.isoformat() in store.held_days():
             res.stopped = f"{day.isoformat()} is held"
+            return res
+        if hand_sent_day(store, day.isoformat()):
+            res.stopped = f"{day.isoformat()} is a hand-sent batch (stored by `queue`): nothing to send"
             return res
         if not is_working_day(day):
             res.stopped = f"{day.isoformat()} isn't a working day"

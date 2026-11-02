@@ -36,7 +36,8 @@ decision-maker. Big companies are kept but mostly filter out (senior roles).
      `tests/test_supply_2f.py`.
    - **2g seed lists at scale + reply outcomes - done (2026-10-28)**, see "Phase 2g notes",
      `tests/test_supply_2g.py` and `tests/test_replies_2g.py`.
-3. Sending & follow-ups - **built 2026-11-01, not yet live** (see "Phase 3 notes" and `tests/test_sending_3.py`):
+3. Sending & follow-ups - engine built 2026-11-01 (see "Phase 3 notes", `tests/test_sending_3.py`) but **not used:
+   sending is manual since 2026-11-02** (see "Manual sending notes", `tests/test_manual_3.py`). The original plan:
    Gmail API (OAuth) from the user's **personal Gmail**.
    Ramp from ~10-15/day to 30-40/day max. Randomized gaps, business hours in the
    recipient's timezone, no open-tracking pixels, resume linked (attached only for recruiters/HR or
@@ -111,7 +112,8 @@ python -m applyflow queue --date D [--no-fresh]     # 2f: per-type gate + freshn
 python -m applyflow supply --consultancies --saas --fintech-seeds --fintech   # 2g: seed lists (only seeds not in the pool)
 python -m applyflow supply --yc-fintech-india       # 2g: YC fintechs abroad with an office / engineering in India
 python -m applyflow mark-replied <email> --outcome {interested,declined_warm,declined,auto_ack} [--recheck D] [--contact "Name <email>"] [--role R] [--keep-followup]
-python -m applyflow gmail-login        # 3: OAuth (gmail.send + gmail.readonly), token in config/private/
+python -m applyflow daily --sent D [--next D] [--skip ID] [--skip-followup ID] [--followups 10] [--force]   # manual: the evening routine
+python -m applyflow gmail-login        # 3 (engine, unused): OAuth (gmail.send + gmail.readonly), token in config/private/
 python -m applyflow reconcile [--from 2026-10-21 --to 2026-10-29] [--release] [--no-inbox]
 python -m applyflow plan [--date D] [--no-fresh]      # 3: next working day: 30 new + follow-ups (<=15) + retries
 python -m applyflow send [--dry-run] [--to-self --limit N] [--no-fresh]
@@ -633,6 +635,15 @@ Open points:
   PYTHONIOENCODING=utf-8, appending to `data/logs/<command>.log`: plan+digest 20:00 Sun-Thu, send 09:00 Mon-Fri
   (WakeToRun, StartWhenAvailable, 4 h limit, IgnoreNew), check-inbox 11:00 / 15:00 / 19:45 daily.
   `scripts/remove_tasks.ps1` removes them. Times are the PC clock: it must be on IST.
+- **Hand-sent days** (`sending.hand_sent_day`): a day with `send_queue` rows and no `send_plan` rows was stored by
+  `queue` and is sent by hand: `plan` refuses it (`HandSentDay`), `send` sends nothing that day, and `queue` refuses
+  a day `plan` already holds. Its rows stay out of later picks (`held_earlier`) until `reconcile` marks them sent on
+  their real dates. `reconcile --to` defaults to today. **2026-11-02 is a hand-sent day** (engine live from 3 Nov):
+  30 hiring inboxes (20 consultancy, 6 SaaS, 4 fintech; 8 role emails; all attach the PDF), `output/batch_2026-11-02.md`;
+  DB backup before it `data/applyflow.pre-1102-queue.db`. Appinventiv was switched from the careers-page "AI/ML
+  Engineer" role email to general outreach (role_matches careers -> "no", reviewed; new draft leads with CareerForge
+  AI + Serverless FileFinder; old file kept as `output/drafts/written/pool-appinventiv-com.role-2g.bak`; backup
+  `data/applyflow.pre-1102-appinventiv.db`). A later `role-check --all` could flip it back.
 - **Recorded 2026-11-01**: Accelerize 360 and Codelattice marked sent 2026-10-29 (their 29 Oct batch rows were
   unmarked), then Accelerize declined_warm (Priyanka Kapoor <pkapoor@accelerize360.com>, HR, recheck 2027-01-05)
   and Codelattice auto_ack with keep_followup. DB backup before Phase 3: `data/applyflow.pre3.db`.
@@ -645,6 +656,59 @@ Open points:
    delivery. Revisit with real data.
 3. The resume link is a Drive link: Drive access requests in the digest mean it isn't shared "anyone with the link".
 4. Follow-up variants share wording across all targets; replies by variant (Phase 4) would show which works.
+
+## Manual sending notes (decided 2026-11-02)
+
+- **Sending stays manual**: the user schedules each batch in Gmail. The Phase 3 engine code stays, but **don't use
+  `plan` / `send` / `reconcile` / `check-inbox` / `digest`**. Batches are stored with `queue` (or `daily`), replies and
+  bounces recorded by hand with `mark-replied` / `mark-bounced --stop`.
+- **`daily --sent D`** (`applyflow/manual.py`, the evening routine, after the day's outcomes are recorded): backs up the
+  DB (`data/applyflow.pre-daily-<D>.db`, SQLite backup API); `--skip ID` takes an unsent row out of D's batch (back
+  into the pool); marks D's batch sent (`mark_batch_sent`) and D's follow-up checklist (`app_state` `followups:<D>`,
+  minus `--skip-followup`) as `followup` events; checks the all-type daily brake on D (bounced events dated D vs
+  sends dated D); tripped -> no next batch unless `--force`; else `make_queue` for the next working day (freshness on),
+  `output/batch_<next>.md` (table with Attach PDF?, evidence lines, rule problems, full drafts),
+  `output/followups_<next>.md` and the HTML report. Idempotent: rerunning marks nothing twice.
+- **Manual follow-ups** (`due_followups(..., manual=True)`, `manual_original`): with no Gmail record the original is
+  the sent event + its draft subject; same Phase 3 eligibility, variants, validator and "last week" rule; checklist
+  capped by `--followups` (10), oldest first. Also (both modes): no follow-up to a target with any `stopped` event
+  (SingleStore was stopped by hand on 23 Oct without a bounce) or to an info@ / contact@ address; a `followup` event
+  counts as "already followed up". Sent by hand as replies in the original thread, no attachment.
+- **Gate change (2026-11-02)**: hiring inboxes pause when **more than 10% of the last 50** hiring-inbox sends bounced
+  (`type_gates.hiring_window` 50, `hiring_max_bounce_rate` 0.10; was 3 of 20). The all-type daily brake
+  (`sending.day_brake`, used by `daily` and the engine's check-inbox) trips at **4 hard bounces, or more than 12% of
+  that day's sends** (`sending.bounce_brake` 4, `bounce_brake_rate` 0.12).
+- **Recorded 2026-11-02** (backup `data/applyflow.pre-1102-manual.db`): 29 Oct batch marked sent on 29 Oct (28 + the
+  2 already marked), 2 Nov batch on 2 Nov (30); smallcase interested (Thirunarayan Sharma
+  <thirunarayan.sharma@smallcase.com>, stored as a verified person; pre-screening questions answered); Hevo Data
+  careers@ and Pyramidion careers@ hard bounces (5.1.1) with `--stop`; Capital Numbers auto_ack from noreply@ with
+  keep_followup, info@capitalnumbers.com in excluded_contacts. Daily brake on 2 Nov: 2 of 30, not tripped.
+- **3 Nov batch** (`daily --sent 2026-11-02`): 25 hiring inboxes + 5 evidence guesses (Fello, 10decoders, Ready,
+  Binks, PaletteHQ); 17 startup, 7 consultancy, 6 fintech; all general; 25 attach the PDF; 30 fresh, 0 problems.
+  Follow-up checklist: 10 (21-22 Oct originals; "my earlier email" wording).
+
+- **Company fit (2026-11-03)**, `outreach.india_gap` / `tech_gap` -> `OutreachItem.fit_hold`, enforced by
+  `BatchRules` (`outreach.require_company_fit`, default on) and left out of `supply_summary`: (1) an India team or
+  remote-India hiring - an Indian city / "India" in the locations, an India-region pool company or manual target, or a
+  role open to India; remote-global companies with no India location fail (Ready, PaletteHQ, Canix, Firstbase,
+  Flockjay, SpruceID); (2) a software / tech company - the 2c.1 non-software words plus consumer goods
+  (`NON_TECH_EXTRA`: apparel, fashion, cosmetics ...) in the name / one-liner / tags / homepage title and description,
+  cleared by a product phrase (`software_product` + `TECH_PRODUCT_EXTRA`: AI-powered, automation, agents, vision AI
+  ...); consultancy / fintech / SaaS seeds are exempt (vetted at verification) except for (3) a homepage saying it
+  has shut down (Neuphony: "will not be operational"). Removed from sendable inventory: Canix, Firstbase.io,
+  Flockjay, SpruceID (hello@), PaletteHQ (guess), Neuphony, Silae (now a clothing store) - plus 11 pure guesses (tech)
+  and 61 (India). False positives fixed while tuning: Datafoundry (AI for pharma / cosmetics), Lifespark (medtech
+  wearable), October (coding agents), Optifye (vision AI).
+- **3 Nov batch fixes (2026-11-03, backup `data/applyflow.pre-1103-fixes.db`)**: Ready (ready.net) and Binks
+  (getbinks.com) added to `never_cold_email` by domain; PaletteHQ and Neuphony dropped by the checks. 10decoders:
+  thomas@10decoders.com is founder & CTO **Edrin Thomas**'s own address ("Who you'll talk to: Thomas, CTO ... Book a
+  meeting -> thomas@" on the homepage), so it's now his verified contact (rank 0); the `edrin@` guess (and alternates)
+  and the `dan@` guess are in excluded_contacts - both rested on thomas@ read as a *first-name* address, but it's a
+  surname (open point: `evidence_for_guess` can't tell a surname-format address from a first-name one). SuperKalam
+  declined_warm (recheck 2027-01-05; they pointed to a React Native internship). The 3 Nov batch was rebuilt with
+  `queue` (rows cleared first: a queued-but-unsent row keeps its queued address): 1 named founder / CTO, 23 hiring
+  inboxes, 3 evidence guesses (Fello, Spyne, FORTYTWO42), 3 hello@; follow-up checklist 10 (Rivvun AI replaced
+  SuperKalam).
 
 ## Calibration backlog
 

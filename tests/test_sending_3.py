@@ -395,21 +395,31 @@ class BrakeTests(Env):
         err = classify_error(400, {"error": {"errors": [{"reason": "invalidArgument"}], "message": "Invalid To header"}})
         self.assertEqual(type(err), GmailError)
 
-    def test_three_hard_bounces_in_a_day_stop_sending(self):
-        store = world()
-        for tid in ("pool-hydra-example", "pool-nuv-example", "pool-nimbus-example"):
+    def test_day_brake_four_bounces_or_over_twelve_percent(self):
+        from applyflow.sending import day_brake
+        cfg = self.profile.outreach["sending"]
+        self.assertEqual(day_brake(3, 30, cfg), "")                    # 10%
+        self.assertIn("4 hard bounces", day_brake(4, 45, cfg))
+        self.assertIn("13%", day_brake(2, 15, cfg))                    # 2 of 15 > 12%
+        self.assertEqual(day_brake(3, 25, cfg), "")                    # exactly 12%: not above
+        self.assertEqual(day_brake(0, 0, cfg), "")
+
+    def test_four_hard_bounces_in_a_day_stop_sending(self):
+        store = world(4)
+        tids = ["pool-hydra-example", "pool-nuv-example", "pool-nimbus-example", "pool-co3-example"]
+        for tid in tids:
             mark_sent(store, self.profile, tid, date(2026, 10, 30))
-        for n, addr in enumerate(("founders@hydra.example", "careers@nuv.example", "priya@nimbus.example")):
+        addrs = ["founders@hydra.example", "careers@nuv.example", "priya@nimbus.example", "careers@co3.example"]
+        for n, addr in enumerate(addrs):
             m = gmail_fixture("dsn_postfix_hard")
             m["id"] = f"dsn{n}"
             m["payload"]["parts"][1]["body"]["data"] = base64.urlsafe_b64encode(
                 f"Final-Recipient: rfc822; {addr}\nAction: failed\nStatus: 5.1.1\n".encode()).decode()
             m["payload"]["parts"][0]["body"]["data"] = base64.urlsafe_b64encode(b"User unknown").decode()
-            store_inbox = FakeGmail([m])
-            check_inbox(store, self.profile, store_inbox, at(MONDAY, 11), since=at(MONDAY, 0), me=ME)
-        self.assertTrue(any(b["kind"] == "bounces" for b in store.brakes(MONDAY.isoformat())))
-        stopped = [e for e in store.events() if e["event"] == "stopped"]
-        self.assertEqual(len(stopped), 3)
+            check_inbox(store, self.profile, FakeGmail([m]), at(MONDAY, 11), since=at(MONDAY, 0), me=ME)
+            braked = any(b["kind"] == "bounces" for b in store.brakes(MONDAY.isoformat()))
+            self.assertEqual(braked, n == 3, n)                       # 3 bounces (no sends today) don't brake
+        self.assertEqual(sum(e["event"] == "stopped" for e in store.events()), 4)
         add_company(store, "pool:zeta.example", "Zeta", website="https://zeta.example",
                     contacts=[contact("careers@zeta.example", "published_inbox", role="careers inbox")])
         plan_day(store, self.profile, MONDAY)
@@ -775,6 +785,35 @@ class ReconcileTests(Env):
         reconcile(store, self.profile, FakeGmail(), date(2026, 10, 29), date(2026, 10, 29), release=True,
                   scan_inbox=False)
         self.assertEqual(store.queue("2026-10-29"), [])
+
+
+class HandSentBatchTests(Env):
+    def test_a_queue_batch_is_never_planned_or_sent_by_the_engine(self):
+        from applyflow.outreach import make_queue
+        from applyflow.sending import HandSentDay
+        store = world(5)
+        make_queue(store, self.profile, MONDAY, size=3)          # `queue --date` Monday: sent by hand from Gmail
+        hand = {r["target_id"] for r in store.queue(MONDAY.isoformat())}
+        with self.assertRaises(HandSentDay):
+            plan_day(store, self.profile, MONDAY)
+        clock = Clock(at(MONDAY, 9))
+        gmail = FakeGmail(clock=clock)
+        self.assertIn("hand-sent", self.send(store, gmail, clock).stopped)
+        tue = MONDAY + timedelta(days=1)
+        plan = plan_day(store, self.profile, tue)                  # before reconcile: Monday's rows are held out
+        self.assertFalse(hand & {it.target_id for it in plan.new})
+        self.assertEqual(len(plan.new), 2)
+        clock = Clock(at(tue, 9))
+        self.send(store, gmail, clock)
+        self.assertFalse(hand & {r["target_id"] for r in store.gmail_messages()})
+        # Monday evening's reconcile finds them in Sent and marks them on their real date
+        items = {i.target_id: i for i in build_items(store, self.profile)}
+        for tid in hand:
+            gmail.add_sent(items[tid].address.email, items[tid].draft.subject, at(MONDAY, 9, 30))
+        res = reconcile(store, self.profile, gmail, date(2026, 10, 21), MONDAY, scan_inbox=False)
+        self.assertEqual(len(res.marked), 3)
+        self.assertEqual({e["event_date"] for e in store.events() if e["event"] == "sent" and e["target_id"] in hand},
+                         {MONDAY.isoformat()})
 
 
 class PlanTests(Env):

@@ -205,14 +205,21 @@ def awaiting_retry(store) -> set[str]:
 
 def followup_status(store, it, day: date, cfg: dict, dnc=None, blocked_companies: set[str] | None = None,
                     original=None, done: set[str] | None = None,
-                    waiting: set[str] | None = None) -> tuple[date | None, str]:
+                    waiting: set[str] | None = None,
+                    stopped: set[str] | None = None) -> tuple[date | None, str]:
     """(due date, '') when the target gets a follow-up on `day`, else (due date or None, why not)."""
     if it.status != "sent" or not it.sent_email:
         return None, f"not a sent target ({it.status})"
     if it.sent_email in it.bounced:
         return None, "bounced"
+    if stopped is None:
+        stopped = stopped_targets(store)
+    if it.target_id in stopped:
+        return None, "stopped"
     if dnc is not None and dnc.blocks(it.sent_email):
         return None, "on the do-not-contact list"
+    if it.sent_email.split("@")[0].lower() in ("info", "contact"):
+        return None, "sent to info@ / contact@: never emailed again"
     if it.outcome in HUMAN_OUTCOMES:
         return None, f"replied ({it.outcome})"
     if it.followups_stopped:
@@ -233,21 +240,38 @@ def followup_status(store, it, day: date, cfg: dict, dnc=None, blocked_companies
     return due, ""
 
 
+def stopped_targets(store) -> set[str]:
+    """Targets with a `stopped` event (a hard bounce with --stop, or stopped by hand without one)."""
+    return {e["target_id"] for e in store.events() if e["event"] == "stopped"}
+
+
+def manual_original(it) -> dict:
+    """Sending is manual (2026-11-02): with no Gmail record, the original is the sent event and its draft's subject
+    (what you sent by hand); you find it in Sent by recipient and subject."""
+    return {"gmail_id": "", "thread_id": "", "rfc_id": "", "sent_at": "",
+            "subject": it.draft.subject if it.draft else "", "email": it.sent_email}
+
+
 def due_followups(store, items: list, day: date, cfg: dict, facts: Facts, dnc=None,
-                  cap: int | None = None) -> tuple[list[FollowUp], dict[str, int]]:
-    """Follow-ups to plan on `day`, oldest original first, at most `cap`; plus counts of why others aren't."""
+                  cap: int | None = None, manual: bool = False) -> tuple[list[FollowUp], dict[str, int]]:
+    """Follow-ups to plan on `day`, oldest original first, at most `cap`; plus counts of why others aren't.
+    `manual`: a sent email with no Gmail record still counts (manual_original)."""
     blocked = {it.company_id for it in items if it.outcome in HUMAN_OUTCOMES}
     done = {r["target_id"] for r in store.gmail_messages() if r["row_type"] == "followup"}
+    done |= {e["target_id"] for e in store.events() if e["event"] == "followup"}
     done |= {r["target_id"] for r in store.plan_rows() if r["row_type"] == "followup"
              and r["status"] in ("sent", "sending", "dropped")}
     waiting = awaiting_retry(store)
+    stopped = stopped_targets(store)
     due, why_not = [], {}
     lo, hi = cfg["followup_words"]
     for it in items:
         if it.status != "sent":
             continue
         original = original_message(store, it)
-        when, why = followup_status(store, it, day, cfg, dnc, blocked, original, done, waiting)
+        if original is None and manual:
+            original = manual_original(it)
+        when, why = followup_status(store, it, day, cfg, dnc, blocked, original, done, waiting, stopped)
         if why:
             key = "not due yet" if why.startswith("due ") else why
             why_not[key] = why_not.get(key, 0) + 1
@@ -264,7 +288,8 @@ def due_followups(store, items: list, day: date, cfg: dict, facts: Facts, dnc=No
             why_not["follow-up text fails validation"] = why_not.get("follow-up text fails validation", 0) + 1
             continue
         due.append(fu)
-    due.sort(key=lambda f: (f.original["sent_at"], f.item.company.lower()))
+    due.sort(key=lambda f: (original_day(f.original, f.item) or day, f.original["sent_at"], f.item.priority,
+                            f.item.company.lower()))
     if cap is not None and len(due) > cap:
         why_not["over the daily follow-up cap (next day)"] = len(due) - cap
         due = due[:cap]

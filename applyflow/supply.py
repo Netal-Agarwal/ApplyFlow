@@ -598,7 +598,7 @@ def supply_summary(items, gates_cfg: dict, daily: int = 30) -> dict[str, Any]:
     by_sector: dict[str, int] = {}
     pending = []
     for it in items:
-        if it.status != "ready" or it.address is None or it.queued_on:
+        if it.status != "ready" or it.address is None or it.queued_on or getattr(it, "fit_hold", ""):
             continue
         k = it.address.kind
         by_kind[k] = by_kind.get(k, 0) + 1

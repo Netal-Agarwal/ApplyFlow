@@ -278,6 +278,7 @@ class OutreachItem:
     recheck: str = ""                          # 2g: YYYY-MM-DD when a declined_warm target is looked at again
     replied_by: str = ""                       # 2g: "Name <email>" of the person who replied, if any
     keep_followup: bool = False                # 3: an auto-reply saying a person will respond (follow-up still due)
+    fit_hold: str = ""                         # 2026-11-03: no India team / remote-India hiring, or not a tech company
 
     @property
     def followups_stopped(self) -> bool:
@@ -532,6 +533,7 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         from applyflow.supply import sector_for
         item.large = large
         item.sector = inputs.sector = sector_for(check["company"], prow, inputs, check["team_size"], large)
+        item.fit_hold = india_gap(inputs, profile) or tech_gap(check["company"], inputs, prow, item.sector, profile)
         item.draft = _draft(inputs, facts, written.get(tid), cfg, terms)
         item.protected = tid in protected
         items.append(item)
@@ -562,6 +564,55 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
     for i, it in enumerate(items, start=1):
         it.priority = i
     return items
+
+
+# 2026-11-03: two checks on every row - the company has an India team or hires remote-India, and it's a software /
+# tech company. Consumer-goods words on top of the 2c.1 non-software list (Binks: an apparel brand).
+NON_TECH_EXTRA = ["apparel", "clothing", "fashion", "garment", "garments", "footwear", "cosmetics", "skincare",
+                  "beauty products", "jewellery", "jewelry", "furniture"]
+# ...and software words that clear a company serving such an industry (Datafoundry: AI for pharma and cosmetics)
+TECH_PRODUCT_EXTRA = ["ai-powered", "ai powered", "cloud-based", "automation", "machine learning", "nlp", "ocr",
+                      "analytics", "software", "platform for", "agents", "coding", "vision ai", "computer vision",
+                      "monitoring"]
+_SHUT_DOWN = re.compile(r"(?:will not|won't|no longer|not) be operational|no longer operational|ceased operations|"
+                        r"(?:has|have) shut down|shutting down|winding down", re.I)
+
+
+def india_gap(inputs: DraftInputs, profile: Profile) -> str:
+    """'' when the company has an India team or hires remote-India: an India location (pool region, YC location,
+    an Indian city) or a role open to India; else why not. Manual targets and India-region pool companies pass."""
+    if inputs.role_location in ("preferred_india", "other_india", "remote_open"):
+        return ""
+    cities = [c.lower() for c in (profile.locations.get("preferred_india") or []) +
+              (profile.locations.get("other_india") or [])] + ["india"]
+    locs = (inputs.locations or "").lower()
+    if any(re.search(r"\b" + re.escape(c) + r"\b", locs) for c in cities):
+        return ""
+    if not inputs.remote_global:
+        return ""
+    return f"no India team or remote-India hiring on record (locations: {inputs.locations or 'none'})"
+
+
+def tech_gap(company: str, inputs: DraftInputs, prow, sector: str, profile: Profile) -> str:
+    """'' for a software / tech company, else why not: the company's own words (name, one-liner, tags, homepage
+    title and description) name a non-software business (the 2c.1 list plus consumer goods) and nothing on the
+    homepage names a software product; or the homepage says it has shut down. Consultancy / fintech / SaaS seeds
+    passed a product or client-software check when verified, so only the shut-down test applies to them."""
+    from applyflow.text import matching_phrases
+    site = " ".join([inputs.homepage_title, inputs.meta_description, inputs.homepage_snippet])
+    if _SHUT_DOWN.search(site):
+        return f"its homepage says it has shut down ('{_SHUT_DOWN.search(site).group(0)}')"
+    if sector in ("consultancy", "fintech", "saas"):
+        return ""
+    tags = " ".join(json.loads(prow["data"]).get("tags") or []) if prow is not None else ""
+    own = " ".join([company, inputs.one_liner, tags, inputs.homepage_title, inputs.meta_description])
+    words = [w.lower() for w in list(profile.pool["non_software"]) + NON_TECH_EXTRA]
+    non = matching_phrases(own, words)
+    product = matching_phrases(f"{inputs.one_liner} {inputs.homepage_title} {inputs.meta_description}",
+                               [w.lower() for w in list(profile.pool["software_product"]) + TECH_PRODUCT_EXTRA])
+    if non and not product:
+        return f"not a software / tech company ({', '.join(non[:3])}; no software product named)"
+    return ""
 
 
 def mark_duplicates(items: list[OutreachItem]) -> None:
@@ -817,8 +868,8 @@ def type_gates(sends: list[SendRecord], day: date, cfg: dict) -> dict[str, TypeG
     """2f, per contact kind: verified named people and founders@ always open (no other type's bounces count);
     evidence-backed guesses (`evidence_guess_per_day`) and hello@ (`general_inbox_per_day`) capped, and paused on
     the day after one with `day_bounces_pause`+ of their bounces (and that day itself, once recorded); hiring
-    inboxes paused while `hiring_max_bounces`+ of their last `hiring_window` sends bounced; pure guesses and
-    unsendable addresses closed."""
+    inboxes paused while more than `hiring_max_bounce_rate` (10%) of their last `hiring_window` (50) sends
+    bounced; pure guesses and unsendable addresses closed."""
     g = cfg["type_gates"]
     pause_at = int(g["day_bounces_pause"])
     today, yesterday = day.isoformat(), (day - timedelta(days=1)).isoformat()
@@ -835,14 +886,17 @@ def type_gates(sends: list[SendRecord], day: date, cfg: dict) -> dict[str, TypeG
         else:
             gates[kind] = TypeGate(kind, "capped", cap, f"up to {cap}/day; {sum(1 for s in mine if s.bounced_on)} "
                                                        f"bounce(s) in {len(mine)} send(s) so far")
-    window, most = int(g["hiring_window"]), int(g["hiring_max_bounces"])
+    window, rate = int(g["hiring_window"]), float(g["hiring_max_bounce_rate"])
     last = sorted((s for s in sends if s.kind == "hiring_inbox" and s.day <= today), key=lambda s: s.day)[-window:]
     bad = sum(1 for s in last if s.bounced_on)
+    share = bad / len(last) if last else 0.0
     gates["hiring_inbox"] = (TypeGate("hiring_inbox", "paused", 0, f"paused: {bad} of the last {len(last)} hiring-inbox "
-                                                                  f"sends bounced ({most}+ of {window})")
-                             if bad >= most else
+                                                                  f"sends bounced ({share:.0%} > {rate:.0%} of the last "
+                                                                  f"{window})")
+                             if share > rate else
                              TypeGate("hiring_inbox", "open", None, f"open: {bad} of the last {len(last)} hiring-inbox "
-                                                                    f"sends bounced (pauses at {most} of {window})"))
+                                                                    f"sends bounced ({share:.0%}; pauses above {rate:.0%} "
+                                                                    f"of the last {window})"))
     gates["guessed"] = TypeGate("guessed", "closed", 0, "closed: a pure pattern guess is never sent (2f)")
     gates["unsendable"] = TypeGate("unsendable", "closed", 0, "closed: support / sales / ops / info@ / contact@")
     gates["other"] = TypeGate("other", "closed", 0, "closed: unclassified address")
@@ -855,11 +909,14 @@ class BatchRules:
     hello@ / hi@ / team@ anywhere but a small startup (`general_inbox_max_team`, sector startup)."""
     require_written: bool = False
     general_max_team: int | None = None
+    require_fit: bool = False                 # 2026-11-03: India team / remote-India + a tech company (fit_hold)
     state: str = "rules"
     limit: int | None = None
     reason: str = ""
 
     def holds(self, it: "OutreachItem") -> str:
+        if self.require_fit and it.fit_hold:
+            return "no India team or not a tech company"
         if self.require_written and it.draft is not None and it.draft.source != "claude":
             return "no validated Claude draft"
         kind = it.address.kind if it.address else ""
@@ -872,7 +929,8 @@ class BatchRules:
 def batch_rules(cfg: dict) -> BatchRules:
     g = cfg.get("type_gates") or {}
     cap = g.get("general_inbox_max_team")
-    return BatchRules(bool(cfg.get("require_written_draft")), None if cap in (None, "") else int(cap))
+    return BatchRules(bool(cfg.get("require_written_draft")), None if cap in (None, "") else int(cap),
+                      bool(cfg.get("require_company_fit", True)))
 
 
 def send_records(store) -> list[SendRecord]:

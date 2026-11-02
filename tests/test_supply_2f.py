@@ -51,13 +51,19 @@ class TypeGateTests(unittest.TestCase):
         self.assertEqual(g["general_inbox"].state, "paused")
         self.assertEqual(self.gates([])["general_inbox"].limit, 5)
 
-    def test_hiring_inboxes_pause_at_three_of_the_last_twenty(self):
-        sends = [SendRecord("2026-10-20", "hiring_inbox", "2026-10-21")] * 3 + \
-                [SendRecord("2026-10-22", "hiring_inbox")] * 17
-        self.assertEqual(self.gates(sends)["hiring_inbox"].state, "paused")
+    def test_hiring_inboxes_pause_above_ten_percent_of_the_last_fifty(self):
+        sends = [SendRecord("2026-10-20", "hiring_inbox", "2026-10-21")] * 6 +                 [SendRecord("2026-10-22", "hiring_inbox")] * 44
+        g = self.gates(sends)["hiring_inbox"]                                     # 6 of 50 = 12%
+        self.assertEqual(g.state, "paused")
+        self.assertIn("6 of the last 50", g.reason)
+        self.assertEqual(self.gates(sends[1:] + [SendRecord("2026-10-22", "hiring_inbox")])["hiring_inbox"].state,
+                         "open")                                                  # 5 of 50 = 10%: not above
         later = sends + [SendRecord("2026-10-25", "hiring_inbox")]               # the oldest bounce leaves the window
         self.assertEqual(self.gates(later)["hiring_inbox"].state, "open")
-        self.assertEqual(self.gates(sends[1:])["hiring_inbox"].state, "open")    # 2 of 19
+        three_of_twenty = [SendRecord("2026-10-20", "hiring_inbox", "2026-10-21")] * 3 +                           [SendRecord("2026-10-22", "hiring_inbox")] * 17
+        self.assertEqual(self.gates(three_of_twenty)["hiring_inbox"].state, "paused")   # 15% of what's there
+        self.assertEqual(self.gates(three_of_twenty + [SendRecord("2026-10-23", "hiring_inbox")] * 10)
+                         ["hiring_inbox"].state, "open")                          # 3 of 30 = 10%
 
     def test_people_and_founders_never_paused_by_others(self):
         sends = [SendRecord("2026-10-27", k, "2026-10-27") for k in ("hiring_inbox", "general_inbox",
