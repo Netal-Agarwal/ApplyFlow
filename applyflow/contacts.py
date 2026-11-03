@@ -567,6 +567,162 @@ def deep_pages(html: str, root: str, limit: int) -> list[str]:
     return pages[:limit]
 
 
+# 2h wide search: up to WIDE_PAGES of the company's own pages, found through its sitemap(s) and links - the deep
+# pages first, then team / about, careers detail pages, press / news / events, the blog index and recent posts,
+# and up to WIDE_PDFS linked PDFs.
+WIDE_PAGES = 25
+WIDE_PDFS = 2
+_WIDE_KINDS = (("people", re.compile(r"team|leadership|founders?|about|people|who-we-are|our-story|management|"
+                                     r"contact", re.I), 6),
+               ("careers", re.compile(r"careers?|jobs?|join|hiring|openings?|positions?|vacanc|internship", re.I), 5),
+               ("press", re.compile(r"press|news|media|newsroom|announce|events?|webinars?|meetups?", re.I), 5),
+               ("blog", re.compile(r"blogs?|insights|articles|posts?|stories|engineering", re.I), 6))
+_WIDE_SKIP = re.compile(r"\.(?:png|jpe?g|gif|svg|webp|ico|zip|mp4|mp3|css|js|json|xml|gz|docx?|xlsx?|pptx?)$|"
+                        r"/(?:tag|tags|category|categories|author|authors|page|feed|wp-json|wp-content|cdn-cgi|amp|"
+                        r"login|signin|signup|cart|checkout|search)(?:/|$)|/(?:hi|de|fr|es|ja|ar|pt|it)/", re.I)
+_SITEMAP_BLOCK = re.compile(r"<(url|sitemap)>(.*?)</\1>", re.S | re.I)
+_SITEMAP_LOC = re.compile(r"<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)", re.I)
+_SITEMAP_MOD = re.compile(r"<lastmod>\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", re.I)
+
+
+def parse_sitemap(xml: str) -> tuple[list[tuple[str, str]], list[str]]:
+    """2h: ([(page url, lastmod)], [child sitemap urls]) from a sitemap or a sitemap index."""
+    pages, children = [], []
+    for kind, body in _SITEMAP_BLOCK.findall(xml or ""):
+        loc = _SITEMAP_LOC.search(body)
+        if not loc:
+            continue
+        url = htmllib.unescape(loc.group(1)).strip()
+        if kind.lower() == "sitemap":
+            children.append(url)
+        else:
+            mod = _SITEMAP_MOD.search(body)
+            pages.append((url, mod.group(1) if mod else ""))
+    return pages, children
+
+
+_CHILD_SITEMAP_RANK = (re.compile(r"page|team|about|career|job|press|news|event|media", re.I),
+                       re.compile(r"post|blog|article|insight|stor", re.I))
+_CHILD_SITEMAP_SKIP = re.compile(r"product|image|video|tag|categor|author|portfolio|attachment|"
+                                 r"location|glossary|integration|template|lang|/hi/|/de/", re.I)
+
+
+def sitemap_entries(client, root: str, max_maps: int = 4) -> list[tuple[str, str]]:
+    """2h: page urls (with lastmod) from the sitemaps robots.txt lists, else /sitemap.xml, /sitemap_index.xml and
+    /wp-sitemap.xml; a sitemap index is followed into at most `max_maps` child sitemaps (pages / careers / press
+    first, then posts; product, tag, author and image sitemaps skipped). Every fetch honours robots.txt."""
+    listed = getattr(client, "sitemaps", lambda _url: [])(root) or []
+    queue = list(dict.fromkeys(listed + [root + "/sitemap.xml", root + "/sitemap_index.xml", root + "/wp-sitemap.xml"]))
+    pages: list[tuple[str, str]] = []
+    fetched, in_index = 0, False
+    while queue and fetched < max_maps:
+        url = queue.pop(0)
+        if url.endswith(".gz"):
+            continue
+        try:
+            xml = client.get_page(url)
+        except FetchError:
+            continue
+        fetched += 1
+        got, children = parse_sitemap(xml)
+        pages.extend(got)
+        if children:
+            kids = [c for c in children if not _CHILD_SITEMAP_SKIP.search(urlparse(c).path)]
+            kids.sort(key=lambda c: next((i for i, rx in enumerate(_CHILD_SITEMAP_RANK) if rx.search(c)), 2))
+            queue = kids + [q for q in queue if q not in kids and not q.startswith(root + "/sitemap")
+                            and not q.startswith(root + "/wp-sitemap")]
+            in_index = True
+        elif got and not in_index:
+            break                                # a plain sitemap with pages: enough
+    return pages
+
+
+def _wide_kind(path: str) -> str:
+    return next((kind for kind, rx, _ in _WIDE_KINDS if rx.search(path)), "")
+
+
+def wide_pages(html: str, root: str, entries: list[tuple[str, str]], limit: int = WIDE_PAGES) -> list[str]:
+    """2h: the pages a wide search reads, in order: the deep search's pages (about / team / careers / contact /
+    footer links / privacy), then sitemap and homepage links by kind - people pages, careers detail pages, press /
+    news / events, the blog index then its most recent posts (sitemap lastmod) - each kind capped, then linked
+    PDFs (WIDE_PDFS). Same site only; tags, authors, feeds, other languages and media files are skipped."""
+    host = urlparse(root).netloc.lower().removeprefix("www.")
+    out = [u for u in deep_pages(html, root, limit)]
+    links: list[tuple[str, str]] = []
+    for href in _HREF.findall(html or ""):
+        links.append((urljoin(root + "/", htmllib.unescape(href.strip())).split("#")[0], ""))
+    pdfs: list[str] = []
+    by_kind: dict[str, list[tuple[str, str]]] = {kind: [] for kind, _, _ in _WIDE_KINDS}
+    for url, mod in list(entries) + links:
+        url = url.split("?")[0].rstrip("/")
+        parts = urlparse(url)
+        h = parts.netloc.lower().removeprefix("www.")
+        if parts.scheme not in ("http", "https") or not (h == host or h.endswith("." + host)) or url == root:
+            continue
+        if parts.path.lower().endswith(".pdf"):
+            if url not in pdfs:
+                pdfs.append(url)
+            continue
+        if _WIDE_SKIP.search(parts.path) or parts.path.count("/") > 3:
+            continue
+        kind = _wide_kind(parts.path)
+        if kind and url not in out and url not in [u for u, _ in by_kind[kind]]:
+            by_kind[kind].append((url, mod))
+    for kind, _, cap in _WIDE_KINDS:
+        cands = by_kind[kind]
+        # an index page (/blog, /press) before its items, then the newest items (sitemap lastmod) first
+        index = [u for u, _ in cands if urlparse(u).path.count("/") <= 1]
+        items = sorted([um for um in cands if urlparse(um[0]).path.count("/") > 1], key=lambda um: um[1], reverse=True)
+        for url in (index + [u for u, _ in items])[:cap]:
+            if url not in out:
+                out.append(url)
+    out = out[:max(0, limit - min(WIDE_PDFS, len(pdfs)))]
+    return out + pdfs[:WIDE_PDFS]
+
+
+_PDF_STREAM = re.compile(rb"stream\r?\n(.*?)\r?\nendstream", re.S)
+_PDF_STRING = re.compile(rb"\(((?:\\.|[^\\)])*)\)")
+
+
+def pdf_text(data: bytes) -> str:
+    """2h: rough text of a PDF without a PDF library: every (Flate-decoded) content stream's literal strings, plus
+    the raw bytes' printable runs. Enough to find an email address printed in a brochure or a press kit."""
+    import zlib
+    chunks: list[bytes] = []
+    for raw in _PDF_STREAM.findall(data or b""):
+        try:
+            raw = zlib.decompress(raw)
+        except zlib.error:
+            pass
+        strings = _PDF_STRING.findall(raw)
+        chunks.append(b"".join(strings) if strings else raw)
+    chunks.append(data or b"")
+    text = b"\n".join(chunks).decode("latin-1", errors="replace")
+    return re.sub(r"[^\x20-\x7e\n]+", " ", text)[:200_000]
+
+
+def surname_owner(local: str, people: list[Person], page_text: str) -> Person | None:
+    """2h: the named founder / CTO / eng lead / recruiter whose *surname* is this address's local part ('thomas@' for
+    Edrin Thomas), when the surname belongs to one named person only, it isn't any named person's first name, and the
+    page that publishes the address names that person (full name or the surname on its own, the address itself
+    aside). Else None - a surname-shaped address is never format evidence either (see evidence_for_guess)."""
+    local = local.lower()
+    if not re.fullmatch(r"[a-z]{3,20}", local):
+        return None
+    if any(name_parts(p.name)[0] == local for p in people):
+        return None
+    owners = [p for p in people if name_parts(p.name)[1] == local]
+    if len({name_parts(p.name) for p in owners}) != 1:
+        return None
+    owner = owners[0]
+    if owner.group not in GUESSABLE_GROUPS | {"recruiting"}:
+        return None
+    text = re.sub(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", " ", page_text or "")
+    if owner.name.lower() in text.lower() or re.search(rf"\b{re.escape(local)}\b", text, re.I):
+        return owner
+    return None
+
+
 def likely_pages(html: str, root: str, limit: int) -> list[str]:
     """Same-site links that look like about/team/contact/careers pages, then conventional paths."""
     host = urlparse(root).netloc.lower().removeprefix("www.")
@@ -598,19 +754,33 @@ class SiteFindings:
     texts: dict[str, str] = field(default_factory=dict)              # 2f: page text by url (first 20,000 chars)
 
 
-def read_site(client, website: str, domain: str, max_pages: int, deep: bool = False) -> SiteFindings:
-    """The homepage plus up to `max_pages` likely pages; `deep` (2e) follows footer links and tries DEEP_PATHS."""
+def read_site(client, website: str, domain: str, max_pages: int, deep: bool = False,
+              wide: bool = False) -> SiteFindings:
+    """The homepage plus up to `max_pages` likely pages; `deep` (2e) follows footer links and tries DEEP_PATHS;
+    `wide` (2h) reads up to WIDE_PAGES pages from the sitemap(s) and links (`wide_pages`), linked PDFs included,
+    and follows a blog / press index into its first posts while the budget lasts."""
     out = SiteFindings()
     root = normalize_website(website)
     queue = [root]
     seen: set[str] = set()
+    budget = WIDE_PAGES + 1 if wide else None
     while queue:
         url = queue.pop(0)
         if url in seen:
             continue
+        if budget is not None and len(seen) >= budget:
+            break
         seen.add(url)
         try:
-            page = client.get_page(url)
+            if wide and urlparse(url).path.lower().endswith(".pdf"):
+                fetch = getattr(client, "get_bytes", None)
+                if fetch is None:
+                    raise FetchError(url, "no binary fetch")
+                page = ""
+                text = pdf_text(fetch(url))
+            else:
+                page = client.get_page(url)
+                text = html_to_text(page)
         except FetchError as exc:
             (out.blocked if "disallowed by robots" in str(exc) else out.failed).append(url)
             if url == root:
@@ -620,14 +790,25 @@ def read_site(client, website: str, domain: str, max_pages: int, deep: bool = Fa
         if not out.careers_page and re.search(r"careers?|jobs|join-us|work-with-us", urlparse(url).path, re.I):
             out.careers_page = url
         if url == root:
-            queue.extend(deep_pages(page, root, max_pages) if deep else likely_pages(page, root, max_pages))
+            if wide:
+                queue.extend(wide_pages(page, root, sitemap_entries(client, root), WIDE_PAGES))
+            else:
+                queue.extend(deep_pages(page, root, max_pages) if deep else likely_pages(page, root, max_pages))
             out.home = {"website": root, "status": "ok", **page_summary(page)}
-        text = html_to_text(page)
+        elif wide and page and _wide_kind(urlparse(url).path) in ("blog", "press", "careers") \
+                and urlparse(url).path.count("/") <= 1:
+            # an index page: its first few same-site items, if the sitemap didn't give them
+            items = [u for u in wide_pages(page, root, [], WIDE_PAGES)
+                     if urlparse(u).path.startswith(urlparse(url).path + "/") and u not in seen and u not in queue]
+            queue.extend(items[:3])
         out.texts[url] = text[:20000]
         for email in [m.strip().lower() for m in _MAILTO.findall(page)] + extract_emails(text):
             if same_site(email.rsplit("@", 1)[-1], domain) and email not in [e for e, _ in out.emails]:
                 out.emails.append((email, url))
-        for person in people_in_text(text, url):
+        # 2h: people named in blog posts, press items and PDFs are often customers, guests or other companies'
+        # staff - only the site's own people / careers pages and the homepage name the team.
+        news = wide and (_wide_kind(urlparse(url).path) in ("blog", "press") or not page)
+        for person in ([] if news else people_in_text(text, url)):
             if person.name not in [p.name for p in out.people]:
                 out.people.append(person)
         for org in _GITHUB_ORG.findall(page):
@@ -818,7 +999,8 @@ def address_format(email: str, company: str = "") -> str:
 
 
 def evidence_for_guess(guess: Contact, published: list[dict], domain: str, company: str = "",
-                       mx: str = "", names: set[str] | None = None) -> tuple[dict, str]:
+                       mx: str = "", names: set[str] | None = None,
+                       surnames: set[str] = frozenset()) -> tuple[dict, str]:
     """2f: (evidence, '') when a guessed address for a named founder / CTO / engineering lead is sendable, else
     ({}, why not). Needs (a) the person's name and role on a cited page (the company's site or its YC page),
     (b) MX records on the domain, (c) a published personal address on the domain in the same format; the guess
@@ -826,7 +1008,8 @@ def evidence_for_guess(guess: Contact, published: list[dict], domain: str, compa
 
     A published address only shows a format when its first part is a real first name: one of `names` (the first
     names of every person ApplyFlow has seen, `Store.known_first_names`), so 'vendor@' or 'complaints@' never
-    count. Without `names`, only first.last-shaped addresses count."""
+    count. Without `names`, only first.last-shaped addresses count. 2h: a one-word address that is a named person's
+    surname (`surnames`: 'thomas@' with Edrin Thomas on the site) is that person's own, not first-name evidence."""
     if guess.group not in GUESSABLE_GROUPS:
         return {}, f"{guess.role or 'contact'} isn't a founder, CTO or engineering lead"
     if not guess.name or not guess.source_url:
@@ -842,6 +1025,8 @@ def evidence_for_guess(guess: Contact, published: list[dict], domain: str, compa
             continue
         fmt = address_format(email, company)
         if not fmt or (first and email.split("@", 1)[0].startswith(first)):   # the person's own address isn't evidence
+            continue
+        if fmt == "first" and email.split("@", 1)[0] in surnames:            # 2h: a surname, not a first name
             continue
         lead = re.split(r"[._]", email.split("@", 1)[0])[0]
         if (names is None and fmt == "first") or (names is not None and lead not in names):
@@ -917,7 +1102,7 @@ def large_inbox_search(client, target: Target, profile: Profile, dnc: DoNotConta
 
 def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, github: GitHubBudget,
                   log: Log = lambda _: None, mx: MXChecker | None = None, deep: bool = False,
-                  names: set[str] | None = None) -> ContactResult:
+                  names: set[str] | None = None, wide: bool = False) -> ContactResult:
     result = ContactResult(target=target, status="none")
     fit_table = ROLE_FIT.get(target.hint, ROLE_FIT["founder or CTO"])
     cands: list[Contact] = []
@@ -963,7 +1148,8 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
     elif target.domain and not _good_enough(cands):
         # 2. The company's own site.
         site = read_site(client, target.website or f"https://{target.domain}", target.domain,
-                         int(profile.contacts["deep_site_pages" if deep else "max_site_pages"]), deep=deep)
+                         int(profile.contacts["deep_site_pages" if deep or wide else "max_site_pages"]),
+                         deep=deep or wide, wide=wide)
         result.context = site.home
         result.careers_page = site.careers_page
         for p in site.people:
@@ -979,8 +1165,12 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
             group, role, confidence, inbox_rank = kind
             local = email.split("@", 1)[0]
             owner = next((p for p in people if pattern_of(local, p.name)), None)
+            surname = None if owner else surname_owner(local, people, site.texts.get(url, ""))   # 2h
             if owner:
                 patterns.append((pattern_of(local, owner.name), email, url))
+                group, role, confidence = owner.group, owner.role, "verified"
+            elif surname:
+                owner = surname
                 group, role, confidence = owner.group, owner.role, "verified"
             elif confidence == "verified" and not re.fullmatch(r"[a-z]{2,}[._-][a-z]{2,}", local):
                 # Not tied to a named person and not first.last-shaped: "rahul@" might be a person or
@@ -989,8 +1179,10 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
             add(Contact(name=owner.name if owner else "", role=role or "person at the company", email=email,
                         confidence=confidence, source="website", source_url=url, group=group,
                         inbox_rank=inbox_rank,
-                        proof="company site" if same_site(site_domain(url), target.domain) else "other page"))
-        note = (f"website{' (deep)' if deep else ''}: read {len(site.read)} page(s), {len(site.emails)} email(s), "
+                        proof="company site" if same_site(site_domain(url), target.domain) else "other page",
+                        note=f"surname address: {owner.name}'s own (named on the same page)" if surname else ""))
+        label = " (wide)" if wide else " (deep)" if deep else ""
+        note = (f"website{label}: read {len(site.read)} page(s), {len(site.emails)} email(s), "
                 f"{len(people)} named people")
         if site.blocked:
             note += f"; robots.txt disallowed {', '.join(urlparse(u).path or '/' for u in site.blocked)}"
@@ -1005,6 +1197,23 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
                     result.reasons.append(f"ignored {p.name} ({p.role}): title names another organisation")
                 elif name_parts(p.name) not in [name_parts(q.name) for q in people]:
                     people.append(p)
+            # 2h: a published address whose owner only the YC page names (rahul@ for founder Rahul ...; a surname
+            # address when the publishing page names that person too).
+            for c in cands:
+                if c.source != "website" or c.name or c.group != "other":
+                    continue
+                local = c.email.split("@", 1)[0]
+                owner = next((p for p in yc if pattern_of(local, p.name)), None)
+                surname = None if owner else surname_owner(local, people, site.texts.get(c.source_url, ""))
+                if owner:
+                    patterns.append((pattern_of(local, owner.name), c.email, c.source_url))
+                owner = owner or surname
+                if owner and owner.group in GUESSABLE_GROUPS | {"recruiting"}:
+                    c.name, c.role, c.group, c.confidence, c.inbox_rank = owner.name, owner.role, owner.group, \
+                        "verified", 0
+                    c.fit = fit_table.get(owner.group, 4)
+                    c.note = "surname address: named on the same page and the YC page" if surname else \
+                        "owner named on the YC page"
 
         # 4. GitHub org linked from the company's own site.
         if site.github_orgs and not _good_enough(cands):
@@ -1085,7 +1294,8 @@ def find_contacts(client, target: Target, profile: Profile, dnc: DoNotContact, g
     taken = {c.email for c in ranked}
     for c in [c for c in ranked if c.confidence == "guessed" and c.source == "pattern"]:
         known = (names or set()) | {name_parts(p.name)[0] for p in people if len(name_parts(p.name)[0]) >= 3}
-        evidence, why = evidence_for_guess(c, published, target.domain, target.company, c.mx, known)
+        evidence, why = evidence_for_guess(c, published, target.domain, target.company, c.mx, known,
+                                           surnames={name_parts(p.name)[1] for p in people} - {""})
         if evidence and (evidence["address"] == c.email or evidence["address"] not in taken):
             apply_evidence(c, evidence)
             result.reasons.append(f"evidence for {c.name}'s guess: {c.note}")

@@ -392,9 +392,51 @@ def parse_header_table(text: str, cfg: dict[str, Any]) -> list[PoolCompany]:
 # Adding to the stored pool
 # ---------------------------------------------------------------------------
 
-def extend_pool(store, profile: Profile, companies: list[PoolCompany], today: date, log: Log = lambda _: None):
+class PoolLock:
+    """2h: a lock file (O_EXCL) around extend_pool's read - merge - save - reselect. save_pool replaces the whole
+    table, so two `supply --shard` runs finishing together would otherwise keep only the later one's companies.
+    Waits up to `wait_s`; a lock older than `stale_s` is a crashed run's."""
+
+    def __init__(self, path: Path | None = None, wait_s: float = 1800, stale_s: float = 3600, poll_s: float = 2.0):
+        from applyflow import config
+        self.path = path or config.ROOT / "data" / "pool.lock"
+        self.wait_s, self.stale_s, self.poll_s = wait_s, stale_s, poll_s
+
+    def __enter__(self):
+        import os
+        import time
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + self.wait_s
+        while True:
+            try:
+                fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, f"{os.getpid()} {time.time():.0f}\n".encode())
+                os.close(fd)
+                return self
+            except FileExistsError:
+                try:
+                    if time.time() - self.path.stat().st_mtime > self.stale_s:
+                        self.path.unlink(missing_ok=True)
+                        continue
+                except FileNotFoundError:
+                    continue
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"another run holds {self.path}")
+                time.sleep(self.poll_s)
+
+    def __exit__(self, *exc):
+        self.path.unlink(missing_ok=True)
+
+
+def extend_pool(store, profile: Profile, companies: list[PoolCompany], today: date, log: Log = lambda _: None,
+                lock: PoolLock | None = None):
     """Merge new companies into the stored pool (dedupe by domain), store their verified homepages as context, and
-    redo the selection offline (pool.reselect). Returns (scored, changes, new keys)."""
+    redo the selection offline (pool.reselect), holding the pool lock (2h). Returns (scored, changes, new keys)."""
+    with lock or PoolLock():
+        return _extend_pool(store, profile, companies, today, log)
+
+
+def _extend_pool(store, profile: Profile, companies: list[PoolCompany], today: date, log: Log = lambda _: None):
     from applyflow.pool import Scored, reselect
     rows = store.pool_rows()
     before = {r["key"]: bool(r["selected"]) for r in rows}

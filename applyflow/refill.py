@@ -658,7 +658,13 @@ _NOT_A_ROLE = re.compile(
     # site links and hire-us pages, not openings ("Developer Portal", "Onboard a Pre-Vetted Developer")
     r"\bportal\b|\bdocs?\b|documentation|developer (?:experience|support|tooling|productivity|relations)|"
     r"\bshape\b|\bonboard\b|pre-vetted|\bdedicated\b|^developers?$|"
-    r"\baem\b|\bcpq\b|svelte|uipath|liferay|tallyprime|\bangular(?:js)?\b|\bvue\b|\bmern\b|\bmean stack\b", re.I)
+    r"\baem\b|\bcpq\b|svelte|uipath|liferay|tallyprime|\bangular(?:js)?\b|\bvue\b|\bmern\b|\bmean stack\b|"
+    # 2h: navigation / marketing lines ("Find a Developer", "Developer Resources", "Your AI-native product engineer",
+    # "AI platforms & developer tools", "Developer Console") and more stacks I don't have
+    r"^find\b|^your\b|\bresources?\b|\bconsole\b|\btools\b|\bplatforms\s*&|\bsharepoint\b|\bblockchain\b|\bweb3\b|"
+    r"\bdynamics 365\b|\bhubspot\b|\bwso2\b|\bhybrid\b|\bnext\.?js\b|\breact\b", re.I)
+# 2h: "Python Developer (3-6 Years)", "Backend Engineer - 2+ yrs": the smallest number of years the title asks for
+_TITLE_YEARS = re.compile(r"\b(\d{1,2})\s*(?:\+|[-–to ]+\s*\d{1,2})?\s*(?:years?|yrs?)\b", re.I)
 _PREFERRED_TITLE = [(re.compile(r"python|fastapi|flask|back-?end|serverless", re.I), 3),
                     (re.compile(r"intern|fresher|junior|\bjr\b|associate|graduate|trainee|\bsde[ -]?(?:i|1)\b", re.I), 2),
                     (re.compile(r"software (?:engineer|developer)|\bsde\b|data engineer|ai|ml", re.I), 1)]
@@ -696,6 +702,9 @@ def careers_page_roles(text: str, profile: Profile) -> tuple[list[str], int]:
             continue
         # 2g: closed roles, community / hub links, "<Employee Name> SDE - I" (a team page), and stacks I don't have
         if _NOT_A_ROLE.search(line) or _person_first(line):
+            continue
+        years = _TITLE_YEARS.search(line)
+        if years and int(years.group(1)) > int(profile.max_years_required):
             continue
         probe = Job(source="careers", external_id="", company="", title=line, url="")
         if not re.search(r"\b(engineer|developer|intern|sde|programmer|scientist|architect|analyst|designer|"

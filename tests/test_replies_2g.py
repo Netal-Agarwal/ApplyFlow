@@ -109,6 +109,10 @@ class StoppedReopenTests(unittest.TestCase):
         g.evidence = ev
         add_company(store, "yc:dec", "Dec", website="https://dec.example", contacts=[g])
         mark_sent(store, PROFILE, "yc-dec", DAY)
+        # sent before 2h, when a staff-evidence guess was still an evidence_guess (2h makes it unsendable)
+        with store.conn:
+            store.conn.execute("UPDATE outreach_events SET kind = 'evidence_guess', email = 'rohit.taneja@dec.example' "
+                               "WHERE target_id = 'yc-dec'")
         return store
 
     def test_evidence_guess_bounce_stops_and_counts_toward_the_gate(self):
@@ -151,7 +155,8 @@ class GuessOutcomeTests(unittest.TestCase):
         self.assertEqual(out["format"], {"first.last@": {"sent": 1, "bounced": 1, "replied": 0}})
         self.assertEqual(out["evidence"], {"staff_first_last": {"sent": 1, "bounced": 1, "replied": 0}})
 
-    def test_first_name_evidence_ranked_above_staff_first_last(self):
+    def test_only_first_name_evidence_is_sendable(self):
+        """2h (2026-11-03): a guess backed only by a staff first.last address is unsendable (was: ranked last)."""
         store = Store(":memory:")
         for key, published in (("yc:aaa", "priya.shah@aaa.example"), ("yc:bbb", "vikram@bbb.example")):
             dom = key.split(":")[1] + ".example"
@@ -159,12 +164,13 @@ class GuessOutcomeTests(unittest.TestCase):
             g.evidence = {"format": "first", "address": f"asha@{dom}", "published": published,
                           "published_url": f"https://{dom}/about", "person_url": f"https://{dom}/team"}
             add_company(store, key, key.upper(), website=f"https://{dom}", contacts=[g])
-        order = [i.target_id for i in build_items(store, PROFILE) if i.status == "ready"]
-        self.assertLess(order.index("yc-bbb"), order.index("yc-aaa"))
+        items = {i.target_id: i for i in build_items(store, PROFILE)}
+        self.assertEqual(items["yc-bbb"].status, "ready")
+        self.assertEqual(items["yc-bbb"].address.kind, "evidence_guess")
+        self.assertEqual(items["yc-aaa"].status, "unsendable")
+        self.assertIn("staff first.last", items["yc-aaa"].status_note)
         batch = make_queue(store, PROFILE, DAY, save=False)
-        ids = [b.target_id for b in batch.items]
-        if len(ids) == 2:
-            self.assertEqual(ids, ["yc-bbb", "yc-aaa"])
+        self.assertEqual([b.target_id for b in batch.items], ["yc-bbb"])
 
 
 class BatchOrderTests(unittest.TestCase):

@@ -131,6 +131,23 @@ class PoliteClient:
         response = self._get(url, None, {"Accept": "text/html"}, max_retries=0)
         return decode_page(response)[:2_000_000]
 
+    def sitemaps(self, url: str) -> list[str]:
+        """2h: the Sitemap: lines of the site's robots.txt ([] when it lists none or can't be read)."""
+        parts = urlparse(url)
+        try:
+            self.allowed_by_robots(url)
+        except FetchError:
+            return []
+        parser = self._robots.get(f"{parts.scheme}://{parts.netloc}")
+        return list((parser.site_maps() if parser is not None else None) or [])
+
+    def get_bytes(self, url: str, max_bytes: int = 5_000_000) -> bytes:
+        """2h: a binary file on a company's site (a linked PDF), honouring robots.txt; one attempt."""
+        if not self.allowed_by_robots(url):
+            raise FetchError(url, "disallowed by robots.txt")
+        response = self._get(url, None, {"Accept": "application/pdf,*/*"}, max_retries=0)
+        return (response.content or b"")[:max_bytes]
+
     def get_text(self, url: str) -> str:
         """A plain-text resource (RSS feed, raw file), honouring robots.txt; retried like an API call."""
         if not self.allowed_by_robots(url):

@@ -151,7 +151,7 @@ class EvidenceGuessTests(unittest.TestCase):
         self.assertEqual(address_format("ops2@a.example"), "")
 
     def test_kind_and_stored_evidence(self):
-        self.assertEqual(contact_kind("asha@a.example", "guessed", evidence={"format": "first"}), "evidence_guess")
+        self.assertEqual(contact_kind("asha@a.example", "guessed", evidence={"format": "first", "published": "rahul@a.example"}), "evidence_guess")
         self.assertEqual(contact_kind("asha@a.example", "guessed"), "guessed")
         store = Store(":memory:")
         c = self.guess()
@@ -449,7 +449,7 @@ class QueuedAddressTests(unittest.TestCase):
 class InferredAndStoppedTests(unittest.TestCase):
     def test_inferred_pattern_addresses_are_guesses(self):
         self.assertEqual(contact_kind("asha@a.example", "strong"), "guessed")
-        self.assertEqual(contact_kind("asha@a.example", "strong", evidence={"format": "first"}), "evidence_guess")
+        self.assertEqual(contact_kind("asha@a.example", "strong", evidence={"format": "first", "published": "rahul@a.example"}), "evidence_guess")
 
     def test_bounced_and_stopped_target_never_moves_to_a_guess(self):
         from applyflow.outreach import mark_bounced, mark_sent

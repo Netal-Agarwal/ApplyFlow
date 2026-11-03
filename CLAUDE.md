@@ -36,6 +36,8 @@ decision-maker. Big companies are kept but mostly filter out (senior roles).
      `tests/test_supply_2f.py`.
    - **2g seed lists at scale + reply outcomes - done (2026-10-28)**, see "Phase 2g notes",
      `tests/test_supply_2g.py` and `tests/test_replies_2g.py`.
+   - **2h supply refill (wide search, seeds, direct-apply list) - done (2026-11-03)**, see "Phase 2h notes" and
+     `tests/test_supply_2h.py`.
 3. Sending & follow-ups - engine built 2026-11-01 (see "Phase 3 notes", `tests/test_sending_3.py`) but **not used:
    sending is manual since 2026-11-02** (see "Manual sending notes", `tests/test_manual_3.py`). The original plan:
    Gmail API (OAuth) from the user's **personal Gmail**.
@@ -113,6 +115,9 @@ python -m applyflow supply --consultancies --saas --fintech-seeds --fintech   # 
 python -m applyflow supply --yc-fintech-india       # 2g: YC fintechs abroad with an office / engineering in India
 python -m applyflow mark-replied <email> --outcome {interested,declined_warm,declined,auto_ack} [--recheck D] [--contact "Name <email>"] [--role R] [--keep-followup]
 python -m applyflow daily --sent D [--next D] [--skip ID] [--skip-followup ID] [--followups 10] [--force]   # manual: the evening routine
+python -m applyflow contacts --wide [--shard 0/4]   # 2h: up to 25 own pages (sitemap, blog, press, careers, PDFs)
+python -m applyflow supply --consultancies --saas --fintech-seeds --shard 0/8   # 2h: parallel seed verification
+python -m applyflow direct-apply       # 2h: output/direct_apply.csv (fitting roles at large / form-only / bounced companies)
 python -m applyflow gmail-login        # 3 (engine, unused): OAuth (gmail.send + gmail.readonly), token in config/private/
 python -m applyflow reconcile [--from 2026-10-21 --to 2026-10-29] [--release] [--no-inbox]
 python -m applyflow plan [--date D] [--no-fresh]      # 3: next working day: 30 new + follow-ups (<=15) + retries
@@ -709,6 +714,81 @@ Open points:
   `queue` (rows cleared first: a queued-but-unsent row keeps its queued address): 1 named founder / CTO, 23 hiring
   inboxes, 3 evidence guesses (Fello, Spyne, FORTYTWO42), 3 hello@; follow-up checklist 10 (Rivvun AI replaced
   SuperKalam).
+
+## Phase 2h notes (supply refill A + C + D, 2026-11-03)
+
+- **A. Wide search** (`contacts --wide`, `contacts.read_site(wide=True)`, `cli.wide_targets`): unprotected targets with a
+  named founder / CTO / eng lead / recruiter but no sendable address (not large, not fit_hold, never wide-searched),
+  up to `WIDE_PAGES` (25) of the site's own pages: the deep pages, then `sitemap_entries` (robots.txt `Sitemap:` lines
+  via `PoliteClient.sitemaps`, else /sitemap.xml, /sitemap_index.xml, /wp-sitemap.xml; an index is followed into <= 4
+  child sitemaps, pages / careers / press first, then posts; product / tag / author / image sitemaps skipped) and
+  homepage links, by kind (`wide_pages`: people pages, careers detail pages, press / news / events, the blog index
+  then its newest posts by lastmod, each capped), plus <= `WIDE_PDFS` (2) linked PDFs (`PoliteClient.get_bytes`,
+  `pdf_text`: Flate streams' literal strings, no PDF library). A blog / press index with no sitemap is followed into
+  its first 3 items. **People named in blog posts, press items or PDFs are never taken as the team** (customers,
+  guests); their addresses still pass the usual legal-page, mockup (4+ unnamed) and role-word rules. A wide lookup
+  that finds nothing sendable keeps the stored contacts (`cli.wide_improved`; a failed YC page had dropped GoSats'
+  founder guess) and is recorded as `app_state` `wide:<key>`.
+- **Surname addresses** (`contacts.surname_owner`): `thomas@` is Edrin Thomas's own address (verified) when the
+  surname belongs to one named person only, it isn't any named person's first name, and the publishing page names
+  that person (the address itself aside). A surname-shaped address is never first-name evidence
+  (`evidence_for_guess(..., surnames=)`). Published addresses whose owner only the YC page names (`rahul@` for founder
+  Rahul) are matched after the YC step too (pattern or surname).
+- **Evidence rule (2026-11-03)**: a guess is sendable (`evidence_guess`) only with **first-name evidence** (a bare
+  first-name address like rahul@ on the same domain); the person's own published address is a verified person anyway.
+  A guess backed only by a staff first.last address is `unsendable` (`outreach.STAFF_EVIDENCE_REASON` in the status
+  note and kind_reason). Outcomes when decided: first-name evidence 6 sent / 0 bounced; staff first.last 4 sent /
+  2 bounced (Decentro, Spyne); 0 human replies either way.
+- **C. Seeds**: two rounds in sources.yaml (`# Phase 2h` blocks in consultancies / saas / fintech_seeds: 545 new lines,
+  deduped against existing seeds and the pool; Pune, Ahmedabad, Kochi, Jaipur, Indore, Chandigarh / Mohali,
+  Coimbatore, Bhubaneswar, Kolkata, Noida first). `supply --shard i/n` verifies seeds in parallel; `supply` re-verifies
+  every seed not in the pool, so old drops are retried (Successive Digital passed this time). **`extend_pool` now
+  holds `data/pool.lock` (`supply.PoolLock`)**: `save_pool` replaces the whole table, and two shards finishing together
+  lost 12 companies (re-added by rerunning that shard). Pool 3552 -> 3925 (373 new: consultancy 245, SaaS 97, fintech
+  31); 0 of them held by the India / tech checks (verification already needs an India signal and client-work / product
+  words). Seed drops over all attempts: homepage failed 425, no India signal 366, no client-work words 54, no product
+  words 15, no MX 15.
+- **Careers-page roles**: `_NOT_A_ROLE` also skips navigation / marketing lines ("Find a Developer", "Developer
+  Resources", "Your AI-native product engineer", "AI platforms & developer tools", "Developer Console") and SharePoint,
+  blockchain / web3, Dynamics 365, HubSpot, WSO2, hybrid, React / Next.js titles; a title asking for more years than
+  `max_years_required` ("Python Developer (3-6 Years)") is skipped (`_TITLE_YEARS`). 15 stored matches were set to
+  "no" by review (notes say "2h review"); Siddhatech / Technostacks titles tidied.
+- **D. Direct apply** (`direct-apply`, `applyflow/direct_apply.py` -> output/direct_apply.csv): companies with status
+  apply_only, large with no hiring inbox, or stopped / bounced (Hevo, Pyramidion, Electric Pe); fit_hold left out.
+  Roles from the company's own ATS board (every posting scored) or careers page (titles that fit; each title's own
+  detail page read when linked for location, years, posted date; a bare title only with an intern / fresher /
+  trainee / SDE I word); stored openings too. A role fits when its family is backend / cloud / full-stack / generic
+  SDE, it's an internship or new-grad role or states no experience (tier skip allowed, rejected never), and it's in
+  India or remote open to India (unknown location only at an India company, noted). The page read as a careers page
+  must have a careers / jobs path (`CAREERS_PATH`; Skill-lync's alumni page was taken for one). Sorted by tier,
+  fresher track, family, then newest. Live: 160 companies, 13 rows; most large Indian companies' careers pages are
+  rendered by JavaScript (Darwinbox, Keka, Workday) and can't be read.
+- **`mark_batch_sent`** marks a (target, address) once: Castler's careers@ bounced, hr@ reopened the target (2g
+  REOPEN_KINDS), and `daily` marked careers@ sent a second time (the duplicate event was removed).
+- **Review exclusions** (excluded_contacts, "2h review"): harsh@okcredit.in (held as in 2f / 2g), hello@chainrisk.io
+  (the domain is now an unrelated site), Saturo (NetSuite-only), Inno Valley Works (Salesforce-only), Dynamic Dreamz
+  (Shopify-only), Nimblechapps (now operations consulting), Abhyaz (Zoho-only; one address was parsed as
+  "-recruitment@"). Shapecrunch (3D-printed insoles) and Staqu (dropped by the tech-fit floor) have no draft.
+- **Drafts**: `output/drafts/drafts_2h.py` + `openings_2h.json` (76 company lines; drafts_2g format, sector lines,
+  ongoing wording; resume attached for hiring inboxes, linked otherwise via resume_action); all passing. hello@ at
+  consultancy / SaaS / fintech companies (21) get no draft: the batch rule sends hello@ only at startups of <= 50.
+- **Recorded 2026-11-03** (backup `data/applyflow.pre-1103-evening.db`): Castler careers@, Spyne sanjay.kumar@
+  (evidence guess, 5.1.1), Peoplebox hello@ (Google Group) bounced with `--stop`; InCred auto_ack; Wobot and Fission
+  Labs declined_warm (recheck 2027-01-05; Akanksha Mahesh, HR, stored as a verified person). `daily --sent 2026-11-03`:
+  brake not tripped (3 of 30); **4 Nov batch**: 18 named people + 12 hiring inboxes, 0 guesses, all Claude drafts,
+  all fresh; follow-up checklist 10.
+- Live 2026-11-03: **84 new sendable contacts** (72 of the goal kinds: 19 named people, 48 hiring inboxes, 5 evidence
+  guesses; plus 12 hello@), 70 of the goal kinds with a validated Claude draft. A (wide, 364 + 159 targets): 12 (9
+  named, 2 evidence, 1 hello@). C (seeds): 72 (10 named, 48 hiring inboxes, 3 evidence, 11 hello@). After the 4 Nov
+  batch: 113 sendable (36 hiring inboxes, 5 evidence guesses, 1 named, 71 hello@) = about 1 full 30/day day.
+
+Open points:
+1. **The 150 goal was not met (72 goal-kind contacts).** The wide search yields ~2-4% of pattern-only targets (small
+   Indian sites rarely publish a personal address anywhere); seed yield is ~20% of verified. Another seed round gives
+   ~15-20 per 100 verified; the bigger lever is a rule decision (hello@ at consultancies of 50+ people).
+2. Castler is reopened through hr@castler.com after careers@ bounced (the 2g reopen rule), although the outcome was
+   recorded with `--stop`; decide whether a mailbox-level NDR should stop the whole domain.
+3. direct_apply.csv is thin (13 rows): JS-rendered careers sites can't be read; 40 companies show no careers page.
 
 ## Calibration backlog
 

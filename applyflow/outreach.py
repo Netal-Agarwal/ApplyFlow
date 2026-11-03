@@ -113,7 +113,11 @@ def contact_kind(email: str, confidence: str, source_url: str = "", name: str = 
     if base in UNSENDABLE_INBOXES or (source_url and legal_page_person(email, source_url, name, source)):
         return "unsendable"
     if confidence in ("guessed", "strong"):        # 2f: an inferred address (pattern) is a guess, seen on no page
-        return "evidence_guess" if evidence else "guessed"
+        if not evidence:
+            return "guessed"
+        # 2h (2026-11-03): only first-name evidence (a founder-style rahul@ on the same domain) makes a guess
+        # sendable; a guess backed only by a staff first.last address bounced 2 of 4 times
+        return "evidence_guess" if evidence_kind(evidence) == "first_name" else "unsendable"
     if base in FOUNDER_INBOXES:
         return "founders"
     if base in HIRING_INBOXES:
@@ -130,6 +134,8 @@ def contact_kind(email: str, confidence: str, source_url: str = "", name: str = 
 
 
 HIRING_PEOPLE = {"founder", "cto", "eng_lead", "recruiting"}
+STAFF_EVIDENCE_REASON = ("guess backed only by a staff first.last address (2h: first-name evidence or the person's own "
+                         "published address only)")
 
 
 _ROLE_LOCAL = ROLE_LOCAL          # 2e name, kept for scripts that import it
@@ -212,6 +218,8 @@ class Address:
                             self.role)
         if kind == "other":
             return classify_published(self.email, self.role, self.source_url, self.company)[1]
+        if kind == "unsendable" and self.evidence and evidence_kind(self.evidence) == "staff_first_last":
+            return STAFF_EVIDENCE_REASON
         return KIND_LABELS.get(kind, kind)
 
     def label(self) -> str:
@@ -503,7 +511,8 @@ def build_items(store, profile: Profile, dnc: DoNotContact | None = None, facts:
         elif blocked:
             item.status, item.status_note = "do_not_contact", f"matches {blocked}"
         elif not remaining and not bounced:
-            item.status, item.status_note = "unsendable", ", ".join(a.email for a in seq)
+            item.status, item.status_note = "unsendable", ", ".join(
+                a.email + (f" ({STAFF_EVIDENCE_REASON})" if a.kind_reason == STAFF_EVIDENCE_REASON else "") for a in seq)
         elif not remaining:
             item.status = "exhausted"
         else:
@@ -1218,10 +1227,13 @@ def mark_batch_sent(store, profile: Profile, batch_day: date, dnc: DoNotContact 
     if not rows:
         raise OutreachError(f"no queue stored for {batch_day.isoformat()}; run `queue --date {batch_day.isoformat()}` first")
     items = {it.target_id: it for it in build_items(store, profile, dnc)}
+    # 2h: a row already marked sent stays marked once, even when a bounce reopened its target (Castler: careers@
+    # bounced, hr@ reopened it, and a rerun marked careers@ sent a second time)
+    done = {(e["target_id"], e["email"]) for e in store.events() if e["event"] == "sent"}
     marked = []
     for r in rows:
         it = items.get(r["target_id"])
-        if it is None or it.status != "ready":
+        if it is None or it.status != "ready" or (r["target_id"], r["email"]) in done:
             continue
         kind = it.address.kind if it.address and it.address.email == r["email"] else ""
         store.add_event(it.target_id, it.company_key, r["email"], "sent", batch_day.isoformat(), batch_day.isoformat(),

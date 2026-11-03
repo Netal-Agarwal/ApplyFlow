@@ -563,6 +563,486 @@ consultancies:
   - {name: Itobuz Technologies, website: itobuz.com, team_size: 50, locations: Kolkata}
   - {name: Brainium Information Technologies, website: brainiuminfotech.com, team_size: 100, locations: Kolkata}
   - {name: Prismberry Technologies, website: prismberry.com, team_size: 100, locations: Noida}
+  # Phase 2h: more product-engineering consultancies (prioritised cities: Pune, Ahmedabad, Kochi, Jaipur, Indore, Chandigarh / Mohali,
+  # Coimbatore, Bhubaneswar, Kolkata, Noida; plus big-city firms not stored yet). team_size approximate.
+  - {name: Saviant Consulting, website: saviant.com, team_size: 150, locations: Pune}
+  - {name: AlgoAnalytics, website: algoanalytics.com, team_size: 100, locations: Pune}
+  - {name: Pratiti Technologies, website: pratititech.com, team_size: 300, locations: Pune}
+  - {name: Opus Technologies, website: opustechglobal.com, team_size: 400, locations: Pune}
+  - {name: Aventior, website: aventior.com, team_size: 200, locations: Pune}
+  - {name: Codvo, website: codvo.ai, team_size: 250, locations: Pune}
+  - {name: Kanaka Software, website: kanakasoftware.com, team_size: 100, locations: Pune}
+  - {name: Thinkbridge, website: thinkbridge.com, team_size: 300, locations: Pune}
+  - {name: Wishtree Technologies, website: wishtreetech.com, team_size: 200, locations: Pune}
+  - {name: Coriolis Technologies, website: coriolis.co.in, team_size: 150, locations: Pune}
+  - {name: Siddhatech, website: siddhatech.com, team_size: 80, locations: Pune}
+  - {name: Pibythree, website: pibythree.com, team_size: 80, locations: Pune}
+  - {name: Amura Marketing Technologies, website: amuratech.com, team_size: 200, locations: Pune}
+  - {name: Vertex Software, website: vertexsoftware.co.in, team_size: 60, locations: Pune}
+  - {name: Persistent Systems, website: persistent.com, team_size: 20000, locations: Pune}
+  - {name: Xoriant, website: xoriant.com, team_size: 4000, locations: Pune}
+  - {name: Saama Technologies, website: saama.com, team_size: 2000, locations: Pune}
+  - {name: Infrrd Labs, website: infrrd.com, team_size: 200, locations: Bangalore}
+  - {name: Smartwork IT Services, website: smartworkit.com, team_size: 50, locations: Pune}
+  - {name: Ecom Express Tech, website: ecomexpress.in, team_size: 5000, locations: Gurgaon}
+  - {name: Scalefusion, website: scalefusion.com, team_size: 400, locations: Pune}
+  - {name: Sarvaha Systems, website: sarvaha.com, team_size: 80, locations: Pune}
+  - {name: Techprimelab, website: techprimelab.com, team_size: 80, locations: Pune}
+  - {name: Bitwise Solutions, website: bitwisesolutions.in, team_size: 40, locations: Pune}
+  - {name: Evolent Tech, website: evolentech.com, team_size: 40, locations: Pune}
+  - {name: CloudStrats, website: cloudstrats.com, team_size: 50, locations: Pune}
+  - {name: Dhanvantari Infotech, website: dhanvantariinfotech.com, team_size: 30, locations: Pune}
+  - {name: ProCohat Technologies, website: procohat.com, team_size: 60, locations: Pune}
+  - {name: Hazel Mobile, website: hazelmobile.com, team_size: 40, locations: Pune}
+  - {name: Infinitum Global, website: infinitumglobal.com, team_size: 60, locations: Pune}
+  - {name: TechMagnate, website: techmagnate.com, team_size: 120, locations: Delhi}
+  - {name: Rysun Labs, website: rysun.com, team_size: 150, locations: Ahmedabad}
+  - {name: Datadesk Technologies, website: datadesk.in, team_size: 40, locations: Pune}
+  - {name: Volansys Technologies, website: volansys.com, team_size: 800, locations: Ahmedabad}
+  - {name: Mobio Solutions, website: mobiosolutions.com, team_size: 100, locations: Ahmedabad}
+  - {name: Intuz, website: intuz.com, team_size: 200, locations: Ahmedabad}
+  - {name: Rlogical Techsoft, website: rlogical.com, team_size: 100, locations: Ahmedabad}
+  - {name: Tridhya Tech, website: tridhyatech.com, team_size: 250, locations: Ahmedabad}
+  - {name: Shaligram Infotech, website: shaligraminfotech.com, team_size: 100, locations: Ahmedabad}
+  - {name: Technostacks, website: technostacks.com, team_size: 150, locations: Ahmedabad}
+  - {name: eSparkBiz, website: esparkinfo.com, team_size: 200, locations: Ahmedabad}
+  - {name: Vrinsoft, website: vrinsofts.com, team_size: 100, locations: Ahmedabad}
+  - {name: iCoderz Solutions, website: icoderzsolutions.com, team_size: 150, locations: Ahmedabad}
+  - {name: Crest Infosystems, website: crestinfosystems.com, team_size: 120, locations: Surat}
+  - {name: The One Technologies, website: theonetechnologies.com, team_size: 100, locations: Ahmedabad}
+  - {name: Infilon Technologies, website: infilon.com, team_size: 120, locations: Ahmedabad}
+  - {name: Inheritx Solutions, website: inheritx.com, team_size: 200, locations: Ahmedabad}
+  - {name: Moweb Technologies, website: moweb.com, team_size: 60, locations: Ahmedabad}
+  - {name: ITPath Solutions, website: itpathsolutions.com, team_size: 100, locations: Ahmedabad}
+  - {name: Nascenture, website: nascenture.com, team_size: 80, locations: Ahmedabad}
+  - {name: WebCodeGenie, website: webcodegenie.com, team_size: 80, locations: Ahmedabad}
+  - {name: Sigma Solve, website: sigmasolve.com, team_size: 150, locations: Ahmedabad}
+  - {name: DhiWise, website: dhiwise.com, team_size: 150, locations: Ahmedabad}
+  - {name: SolGuruz, website: solguruz.com, team_size: 80, locations: Ahmedabad}
+  - {name: Elluminati, website: elluminatiinc.com, team_size: 150, locations: Ahmedabad}
+  - {name: Thinktanker, website: thinktanker.io, team_size: 60, locations: Ahmedabad}
+  - {name: Fusion Informatics, website: fusioninformatics.com, team_size: 200, locations: Ahmedabad}
+  - {name: Svaapta IT-Ally, website: svaapta-it-ally.com, team_size: 80, locations: Ahmedabad}
+  - {name: Simprosys InfoMedia, website: simprosys.com, team_size: 100, locations: Anand}
+  - {name: Softvan, website: softvan.in, team_size: 60, locations: Ahmedabad}
+  - {name: Codevision Infotech, website: codevisionstudio.com, team_size: 40, locations: Ahmedabad}
+  - {name: Prakash Software, website: prakashinfotech.com, team_size: 120, locations: Ahmedabad}
+  - {name: Hyperthink Systems, website: hyperthinksys.com, team_size: 60, locations: Ahmedabad}
+  - {name: Bytes Technolab, website: bytestechnolab.com, team_size: 200, locations: Ahmedabad}
+  - {name: Yudiz Solutions Ahmedabad, website: yudiz.in, team_size: 300, locations: Ahmedabad}
+  - {name: Openmind Infotech, website: openmindinfo.com, team_size: 40, locations: Ahmedabad}
+  - {name: Silver Touch, website: silvertouchtech.co.uk, team_size: 1000, locations: Ahmedabad}
+  - {name: Kevit Technologies, website: kevit.io, team_size: 60, locations: Ahmedabad}
+  - {name: Techcronus, website: techcronus.com, team_size: 100, locations: Ahmedabad}
+  - {name: AddWeb Solution, website: addwebsolution.com, team_size: 150, locations: Ahmedabad}
+  - {name: Kalp Systems, website: kalpsystems.com, team_size: 40, locations: Ahmedabad}
+  - {name: Maven Infosoft, website: maveninfosoft.com, team_size: 40, locations: Ahmedabad}
+  - {name: Sunrise Technologies, website: sunrise-tech.com, team_size: 40, locations: Ahmedabad}
+  - {name: Rapid Innovation, website: rapidinnovation.io, team_size: 150, locations: Ahmedabad}
+  - {name: Webmyne Systems, website: webmyne.com, team_size: 60, locations: Vadodara}
+  - {name: Narola Infotech, website: narolainfotech.com, team_size: 300, locations: Surat}
+  - {name: Logistic Infotech, website: logisticinfotech.com, team_size: 60, locations: Rajkot}
+  - {name: Rao Information Technology, website: raoinformationtechnology.com, team_size: 60, locations: Ahmedabad}
+  - {name: Brainerhub Solutions, website: brainerhub.com, team_size: 80, locations: Ahmedabad}
+  - {name: Aliansoftware, website: aliansoftware.com, team_size: 60, locations: Ahmedabad}
+  - {name: Hybrid Technologies, website: hybridtechnologies.in, team_size: 40, locations: Ahmedabad}
+  - {name: Sufalam Technologies, website: sufalamtech.com, team_size: 60, locations: Ahmedabad}
+  - {name: Dynamic Methods, website: dynamicmethods.in, team_size: 40, locations: Ahmedabad}
+  - {name: Kuwy, website: kuwy.in, team_size: 30, locations: Ahmedabad}
+  - {name: Codezeel, website: codezeel.com, team_size: 40, locations: Ahmedabad}
+  - {name: Shivay Infotech, website: shivayinfotech.com, team_size: 30, locations: Ahmedabad}
+  - {name: The NineHertz, website: theninehertz.com, team_size: 200, locations: Jaipur}
+  - {name: Next Big Technology, website: nextbigtechnology.com, team_size: 100, locations: Jaipur}
+  - {name: Emizentech, website: emizentech.com, team_size: 150, locations: Jaipur}
+  - {name: Data Ingenious Global, website: dataingenious.com, team_size: 100, locations: Jaipur}
+  - {name: Dotsquares, website: dotsquares.com, team_size: 1000, locations: Jaipur}
+  - {name: Sunarc Technologies, website: sunarctechnologies.com, team_size: 80, locations: Jaipur}
+  - {name: iQuinceSoft, website: iquincesoft.com, team_size: 40, locations: Jaipur}
+  - {name: Kadam Technologies, website: kadamtech.com, team_size: 60, locations: Jaipur}
+  - {name: Girnar Software, website: girnarsoft.com, team_size: 3000, locations: Jaipur}
+  - {name: Vaival Technologies, website: vaivaltech.com, team_size: 40, locations: Jaipur}
+  - {name: Mangalam Information Technologies, website: mangalaminfotech.net, team_size: 30, locations: Jaipur}
+  - {name: Techno Softwares, website: technosoftwares.com, team_size: 60, locations: Jaipur}
+  - {name: Shriv ComMedia, website: shrivcommedia.com, team_size: 40, locations: Jaipur}
+  - {name: Appsinvo, website: appsinvo.com, team_size: 60, locations: Noida}
+  - {name: TechSaga, website: techsagacorporations.com, team_size: 80, locations: Noida}
+  - {name: Lovelace Technologies, website: lovelacetech.com, team_size: 30, locations: Jaipur}
+  - {name: Bigscal Technologies, website: bigscal.com, team_size: 60, locations: Surat}
+  - {name: Exaltare Technologies, website: exaltare.in, team_size: 30, locations: Jaipur}
+  - {name: Webanix, website: webanix.in, team_size: 30, locations: Jaipur}
+  - {name: Kriyaninfo, website: kriyaninfotech.com, team_size: 30, locations: Jaipur}
+  - {name: Ensuesoft, website: ensuesoft.com, team_size: 40, locations: Jaipur}
+  - {name: Lemosys Infotech, website: lemosys.com, team_size: 60, locations: Indore}
+  - {name: Webdunia, website: webdunia.net, team_size: 300, locations: Indore}
+  - {name: Infowind Technologies, website: infowindtech.com, team_size: 100, locations: Indore}
+  - {name: BigOh Tech, website: bigohtech.com, team_size: 150, locations: Noida}
+  - {name: Infocrats, website: infocrats.com, team_size: 60, locations: Indore}
+  - {name: Yash Technologies, website: yash.com, team_size: 8000, locations: Indore}
+  - {name: Taritas Software, website: taritas.com, team_size: 40, locations: Indore}
+  - {name: Ciphersoft, website: ciphersoftinc.com, team_size: 40, locations: Indore}
+  - {name: Vrinda Techapps, website: vrindatechapps.com, team_size: 40, locations: Indore}
+  - {name: CodeYeti, website: codeyeti.in, team_size: 40, locations: Indore}
+  - {name: Nexorbit Technologies, website: nexorbit.in, team_size: 30, locations: Indore}
+  - {name: Clustox, website: clustox.com, team_size: 40, locations: Indore}
+  - {name: Coherent Technologies, website: coherent.in, team_size: 40, locations: Indore}
+  - {name: Sanganan IT Solutions, website: sanganan.in, team_size: 30, locations: Indore}
+  - {name: Kush Infotech, website: kushinfotech.com, team_size: 30, locations: Indore}
+  - {name: Advaiya Solutions, website: advaiya.com, team_size: 300, locations: Udaipur}
+  - {name: Taskmo, website: taskmo.com, team_size: 300, locations: Bangalore}
+  - {name: Promact Indore, website: promanage.in, team_size: 30, locations: Indore}
+  - {name: eWay Corp, website: ewaycorp.com, team_size: 200, locations: Indore}
+  - {name: Pirai Infotech, website: piraiinfo.com, team_size: 40, locations: Vellore}
+  - {name: Ingenious Digital, website: ingeniousdigital.in, team_size: 30, locations: Indore}
+  - {name: Net Solutions, website: netsolutions.com, team_size: 500, locations: Chandigarh}
+  - {name: Kitlabs, website: kitlabs.us, team_size: 80, locations: Mohali}
+  - {name: Ameotech Informatics, website: ameotech.com, team_size: 60, locations: Mohali}
+  - {name: SoftProdigy, website: softprodigy.com, team_size: 100, locations: Mohali}
+  - {name: CS Soft Solutions, website: cssoftsolutions.com, team_size: 100, locations: Mohali}
+  - {name: IDS Logic, website: idslogic.com, team_size: 80, locations: Mohali}
+  - {name: Sebiz Infotech, website: sebiz.net, team_size: 60, locations: Mohali}
+  - {name: Arsh Infosystems, website: arshinfosystems.com, team_size: 40, locations: Mohali}
+  - {name: Hopinfirst, website: hopinfirst.com, team_size: 40, locations: Mohali}
+  - {name: Mind Digital Group, website: minddigital.com, team_size: 50, locations: Chandigarh}
+  - {name: Quark Software Chandigarh, website: quark.com, team_size: 1500, locations: Mohali}
+  - {name: Bitcot India, website: bitcot.com, team_size: 120, locations: Mohali}
+  - {name: Sachtech Solution, website: sachtechsolution.com, team_size: 40, locations: Mohali}
+  - {name: Ranium Systems, website: raniumsystems.com, team_size: 40, locations: Mohali}
+  - {name: Brihaspati Infotech, website: brihaspatitech.com, team_size: 80, locations: Mohali}
+  - {name: Ecomm Planet, website: ecommplanet.com, team_size: 30, locations: Mohali}
+  - {name: Kodehash Technologies, website: kodehash.com, team_size: 40, locations: Mohali}
+  - {name: Developer Bazaar Technologies, website: developerbazaar.com, team_size: 40, locations: Indore}
+  - {name: JTM Technologies, website: jtmtechnologies.com, team_size: 30, locations: Mohali}
+  - {name: Smarthub Solutions, website: smarthubsolutions.com, team_size: 30, locations: Mohali}
+  - {name: Visions Software, website: visionssoftware.com, team_size: 30, locations: Chandigarh}
+  - {name: Sirsoft, website: sirsoft.in, team_size: 30, locations: Chandigarh}
+  - {name: Kiwitech, website: kiwitech.com, team_size: 300, locations: Noida}
+  - {name: Nickelfox Technologies, website: nickelfox.com, team_size: 150, locations: Noida}
+  - {name: Fluper, website: fluper.com, team_size: 100, locations: Noida}
+  - {name: Agicent Technologies, website: agicent.com, team_size: 100, locations: Noida}
+  - {name: PixelCrayons, website: pixelcrayons.com, team_size: 500, locations: Noida}
+  - {name: SynapseIndia, website: synapseindia.com, team_size: 800, locations: Noida}
+  - {name: Appventurez, website: appventurez.com, team_size: 150, locations: Noida}
+  - {name: Q3 Technologies, website: q3tech.com, team_size: 300, locations: Gurgaon}
+  - {name: Brainmobi, website: brainmobi.com, team_size: 80, locations: Gurgaon}
+  - {name: BluePi Consulting, website: bluepiit.com, team_size: 150, locations: Gurgaon}
+  - {name: Tagbin, website: tagbin.in, team_size: 150, locations: Gurgaon}
+  - {name: Gemini Solutions, website: geminisolutions.com, team_size: 600, locations: Gurgaon}
+  - {name: Mobilecoderz, website: mobilecoderz.com, team_size: 80, locations: Noida}
+  - {name: Hidden Minds, website: hiddenminds.in, team_size: 40, locations: Noida}
+  - {name: Mamsys Consulting, website: mamsys.com, team_size: 200, locations: Noida}
+  - {name: Atomic Loops, website: atomicloops.com, team_size: 40, locations: Pune}
+  - {name: Codeyogi, website: codeyogi.io, team_size: 30, locations: Noida}
+  - {name: Techies Infotech, website: techiesinfotech.com, team_size: 40, locations: Mohali}
+  - {name: Ebizneeds, website: ebizneeds.com, team_size: 40, locations: Delhi}
+  - {name: Uneecops Technologies, website: uneecops.com, team_size: 300, locations: Delhi}
+  - {name: Ingenuity Gaming, website: ingenuitygaming.com, team_size: 400, locations: Noida}
+  - {name: Innovapptive India, website: innovapptive.com, team_size: 200, locations: Hyderabad}
+  - {name: Vervelogic, website: vervelogic.com, team_size: 60, locations: Jaipur}
+  - {name: iMarque Solutions, website: imarque.co.in, team_size: 60, locations: Delhi}
+  - {name: Cyfuture, website: cyfuture.com, team_size: 1500, locations: Noida}
+  - {name: Eminence Technology, website: eminencetechnology.com, team_size: 40, locations: Noida}
+  - {name: Techuz InfoWeb, website: techuz.com, team_size: 60, locations: Ahmedabad}
+  - {name: Appstudio, website: appstudio.ca, team_size: 40, locations: Delhi}
+  - {name: Prologic Technologies, website: prologictechnologies.in, team_size: 40, locations: Noida}
+  - {name: DigiMantra Labs, website: digimantralabs.com, team_size: 80, locations: Mohali}
+  - {name: Expedux, website: expedux.com, team_size: 30, locations: Gurgaon}
+  - {name: Cloud Destinations, website: clouddestinations.com, team_size: 40, locations: Gurgaon}
+  - {name: Coding Brains, website: codingbrains.com, team_size: 60, locations: Lucknow}
+  - {name: Paramount Software Solutions, website: paramountsoft.net, team_size: 60, locations: Noida}
+  - {name: Grapes IDMR, website: grapesidmr.com, team_size: 40, locations: Delhi}
+  - {name: Dev Technosys Noida, website: devtechnosys.ae, team_size: 40, locations: Jaipur}
+  - {name: Codesquare Technologies, website: codesquaretech.com, team_size: 30, locations: Noida}
+  - {name: Sagacious Infosystems, website: sagaciousinfo.com, team_size: 30, locations: Bangalore}
+  - {name: Wegile, website: wegile.com, team_size: 60, locations: Mohali}
+  - {name: Ignis Tech Solutions, website: ignistech.com, team_size: 30, locations: Noida}
+  - {name: Techjockey Labs, website: techjockey.com, team_size: 300, locations: Noida}
+  - {name: Mindster, website: mindster.com, team_size: 100, locations: Kochi}
+  - {name: Iroid Technologies, website: iroidtechnologies.com, team_size: 60, locations: Kochi}
+  - {name: Spericorn Technology, website: spericorn.com, team_size: 80, locations: Kochi}
+  - {name: Toobler Technologies, website: toobler.com, team_size: 60, locations: Kochi}
+  - {name: Xminds Infotech, website: xminds.com, team_size: 100, locations: Trivandrum}
+  - {name: Zerone Consulting, website: zerone-consulting.com, team_size: 100, locations: Kochi}
+  - {name: Feathersoft, website: feathersoft.com, team_size: 100, locations: Kochi}
+  - {name: Innovation Incubator, website: innovationincubator.com, team_size: 100, locations: Kochi}
+  - {name: Faith Infotech, website: faithinfotech.com, team_size: 100, locations: Trivandrum}
+  - {name: Codelynks, website: codelynks.com, team_size: 60, locations: Kochi}
+  - {name: Techgentsia Software, website: techgentsia.com, team_size: 100, locations: Kochi}
+  - {name: Nest Digital, website: nestdigital.com, team_size: 1500, locations: Kochi}
+  - {name: Codegreen Tech, website: codegreentech.com, team_size: 40, locations: Kochi}
+  - {name: WebCastle, website: webcastletech.com, team_size: 60, locations: Kochi}
+  - {name: Logidots Technologies, website: logidots.com, team_size: 60, locations: Trivandrum}
+  - {name: Riafy Technologies, website: riafy.me, team_size: 60, locations: Kochi}
+  - {name: Livares Technologies, website: livares.com, team_size: 40, locations: Kochi}
+  - {name: Infolitz, website: infolitz.com, team_size: 30, locations: Kochi}
+  - {name: Pumex Computing, website: pumexinfotech.com, team_size: 150, locations: Kochi}
+  - {name: Aot Technologies, website: aot-technologies.com, team_size: 200, locations: Trivandrum}
+  - {name: Qmax Systems, website: qmaxsystems.com, team_size: 40, locations: Kochi}
+  - {name: Lamnea Software, website: lamnea.com, team_size: 30, locations: Kochi}
+  - {name: Cybrosys Technologies, website: cybrosys.com, team_size: 200, locations: Kozhikode}
+  - {name: Ewall Solutions, website: ewallsolutions.com, team_size: 30, locations: Kochi}
+  - {name: Dexlock, website: dexlock.com, team_size: 30, locations: Kochi}
+  - {name: Alignminds, website: alignminds.com, team_size: 60, locations: Kochi}
+  - {name: Tecnovators, website: tecnovators.com, team_size: 30, locations: Kochi}
+  - {name: Sparrow Software, website: sparrowsoftware.in, team_size: 30, locations: Kochi}
+  - {name: CodingMart Technologies, website: codingmart.com, team_size: 200, locations: Coimbatore}
+  - {name: Infognana Solutions, website: infognana.com, team_size: 300, locations: Coimbatore}
+  - {name: KGiSL, website: kgisl.com, team_size: 3000, locations: Coimbatore}
+  - {name: Element5 Digital, website: element5digital.com, team_size: 100, locations: Coimbatore}
+  - {name: Swaas Systems, website: swaas.net, team_size: 300, locations: Chennai}
+  - {name: Avasoft, website: avasoft.com, team_size: 1500, locations: Chennai}
+  - {name: iLink Digital, website: ilink-digital.com, team_size: 800, locations: Chennai}
+  - {name: Codemantra, website: codemantra.com, team_size: 1000, locations: Chennai}
+  - {name: Ivy Mobility, website: ivymobility.com, team_size: 500, locations: Chennai}
+  - {name: Pickyourtrail, website: pickyourtrail.com, team_size: 300, locations: Chennai}
+  - {name: Bluetree Digital, website: bluetreedigital.co.in, team_size: 30, locations: Coimbatore}
+  - {name: DataPattern, website: datapattern.ai, team_size: 100, locations: Chennai}
+  - {name: Effitrac Solutions, website: effitrac.com, team_size: 40, locations: Coimbatore}
+  - {name: Thinkbiz Technology, website: thinkbiz.in, team_size: 40, locations: Coimbatore}
+  - {name: Grape Software, website: grapesoftware.com, team_size: 30, locations: Coimbatore}
+  - {name: Vertace, website: vertace.com, team_size: 40, locations: Coimbatore}
+  - {name: Tooliqa, website: tooliqa.com, team_size: 30, locations: Coimbatore}
+  - {name: Nunar, website: nunar.in, team_size: 30, locations: Coimbatore}
+  - {name: Aim Technologies, website: aimtechnologies.co.in, team_size: 30, locations: Coimbatore}
+  - {name: Ascent Software, website: theascentsoftware.com, team_size: 30, locations: Coimbatore}
+  - {name: Enfin Technologies, website: enfintechnologies.com, team_size: 30, locations: Coimbatore}
+  - {name: Moxit Technologies, website: moxittechnologies.com, team_size: 30, locations: Coimbatore}
+  - {name: Accentuate Technologies, website: accentuatetech.com, team_size: 30, locations: Coimbatore}
+  - {name: Kovai.co, website: kovai.co, team_size: 300, locations: Coimbatore}
+  - {name: Aspire Systems, website: aspiresys.com, team_size: 4000, locations: Chennai}
+  - {name: Bahwan Cybertek, website: bahwancybertek.com, team_size: 3000, locations: Chennai}
+  - {name: Mobius by Gaian, website: gaiansolutions.com, team_size: 300, locations: Hyderabad}
+  - {name: Smackcoders, website: smackcoders.com, team_size: 60, locations: Erode}
+  - {name: Zoftsolutions, website: zoftsolutions.com, team_size: 30, locations: Chennai}
+  - {name: Agaram Infotech, website: agaraminfotech.com, team_size: 40, locations: Chennai}
+  - {name: Mindmade Technologies, website: mindmade.in, team_size: 40, locations: Coimbatore}
+  - {name: Inno Valley Works, website: innovalleyworks.com, team_size: 30, locations: Coimbatore}
+  - {name: Qruize Technologies, website: qruize.com, team_size: 30, locations: Chennai}
+  - {name: Bytize, website: bytize.com, team_size: 30, locations: Chennai}
+  - {name: CSM Technologies, website: csm.tech, team_size: 1500, locations: Bhubaneswar}
+  - {name: Sjain Ventures, website: sjainventures.com, team_size: 60, locations: Bhubaneswar}
+  - {name: Xalted Information Systems, website: xalted.com, team_size: 200, locations: Bhubaneswar}
+  - {name: Oasys Cybernetics, website: oasyscyber.com, team_size: 60, locations: Bhubaneswar}
+  - {name: SparkTG, website: sparktg.com, team_size: 100, locations: Bhubaneswar}
+  - {name: Tech Mind Solutions, website: techmindsolution.in, team_size: 30, locations: Bhubaneswar}
+  - {name: Silicon Techlab, website: silicontechlab.com, team_size: 40, locations: Bhubaneswar}
+  - {name: Mindfire Digital, website: mindfiredigital.com, team_size: 40, locations: Bhubaneswar}
+  - {name: ReliSys Software, website: relisys.co.in, team_size: 40, locations: Bhubaneswar}
+  - {name: Tecxprt, website: tecxprt.com, team_size: 30, locations: Bhubaneswar}
+  - {name: Kredpool Tech, website: kredpool.com, team_size: 30, locations: Bhubaneswar}
+  - {name: Pathfinder Software, website: pathfinder.co.in, team_size: 30, locations: Bhubaneswar}
+  - {name: Openwave Odisha, website: openwavecomp.in, team_size: 40, locations: Bhubaneswar}
+  - {name: Exavalu, website: exavalu.com, team_size: 300, locations: Kolkata}
+  - {name: Webspiders Solutions, website: webspiders.com, team_size: 150, locations: Kolkata}
+  - {name: RS Software, website: rssoftware.com, team_size: 500, locations: Kolkata}
+  - {name: Cyberswift Infotech, website: cyberswift.com, team_size: 150, locations: Kolkata}
+  - {name: eSolz Technologies, website: esolzpro.com, team_size: 60, locations: Kolkata}
+  - {name: Saturo Technologies, website: saturotech.com, team_size: 40, locations: Kolkata}
+  - {name: Matrix Infosystems, website: matrixinfosystems.in, team_size: 30, locations: Kolkata}
+  - {name: Unicode Systems, website: unicodesystems.in, team_size: 60, locations: Kolkata}
+  - {name: Echo Innovate IT, website: echoinnovateit.com, team_size: 40, locations: Kolkata}
+  - {name: Plexus Technology, website: plexustechnology.in, team_size: 30, locations: Kolkata}
+  - {name: Infinity Infoway, website: infinityinfoway.com, team_size: 30, locations: Kolkata}
+  - {name: Sraa Info Solutions, website: sraainfo.com, team_size: 30, locations: Kolkata}
+  - {name: Dhaninfo Systems, website: dhaninfo.biz, team_size: 30, locations: Kolkata}
+  - {name: Codevian Technologies, website: codevian.com, team_size: 40, locations: Pune}
+  - {name: Pivotal Software Kolkata, website: pivotroots.com, team_size: 100, locations: Mumbai}
+  - {name: Ixsight Technologies, website: ixsight.com, team_size: 60, locations: Mumbai}
+  - {name: Digital Avenues, website: digitalavenues.com, team_size: 60, locations: Kolkata}
+  - {name: Sourcecode Technology, website: sourcecodetech.com, team_size: 30, locations: Kolkata}
+  - {name: Appycodes, website: appycodes.com, team_size: 30, locations: Kolkata}
+  - {name: Linkwell Kolkata, website: linkwellmedia.com, team_size: 30, locations: Kolkata}
+  - {name: Technotrix, website: technotrix.co.in, team_size: 30, locations: Kolkata}
+  - {name: Bluehorse Software, website: bluehorse.in, team_size: 60, locations: Kolkata}
+  - {name: ODMT, website: odmt.co.in, team_size: 30, locations: Kolkata}
+  - {name: Tuple Technologies, website: tupletechnologies.net, team_size: 30, locations: Kolkata}
+  - {name: Ardent Computech, website: ardentcomputech.com, team_size: 60, locations: Kolkata}
+  - {name: Neuron Infotech, website: neuroninfotech.com, team_size: 30, locations: Kolkata}
+  - {name: Inflexion Analytix, website: inflexionanalytix.com, team_size: 30, locations: Kolkata}
+  - {name: Arcitech, website: arcitech.ai, team_size: 100, locations: Mumbai}
+  - {name: Snapwork Technologies, website: snapwork.co.in, team_size: 300, locations: Mumbai}
+  - {name: NeoSOFT Technologies, website: neosofttech.com, team_size: 4000, locations: Mumbai}
+  - {name: Think201, website: think201.com, team_size: 40, locations: Bangalore}
+  - {name: Logixal, website: logixal.com, team_size: 100, locations: Mumbai}
+  - {name: Jash Data Sciences, website: jashds.com, team_size: 40, locations: Mumbai}
+  - {name: Techved Consulting, website: techved.com, team_size: 150, locations: Mumbai}
+  - {name: AppGlide, website: appglide.io, team_size: 40, locations: Mumbai}
+  - {name: Infinite Open Source Solutions, website: infiniteopensource.com, team_size: 40, locations: Mumbai}
+  - {name: Datamatics, website: datamatics.com, team_size: 10000, locations: Mumbai}
+  - {name: Clover Infotech, website: cloverinfotech.com, team_size: 3000, locations: Mumbai}
+  - {name: Ventura Software, website: venturasecurities.com, team_size: 1000, locations: Mumbai}
+  - {name: Codeforce Technologies, website: codeforce.in, team_size: 30, locations: Mumbai}
+  - {name: Infiniti Software Solutions, website: infinitisoftware.net, team_size: 400, locations: Chennai}
+  - {name: Sciative Solutions, website: sciative.com, team_size: 200, locations: Mumbai}
+  - {name: Hexagon Infosoft, website: hexagoninfosoft.com, team_size: 30, locations: Mumbai}
+  - {name: Websym Technologies, website: websym.in, team_size: 30, locations: Pune}
+  - {name: Excellence Technologies, website: excellencetechnologies.in, team_size: 40, locations: Noida}
+  - {name: Kraftwork Solutions, website: kraftwork.in, team_size: 30, locations: Mumbai}
+  - {name: Webential Technologies, website: webential.com, team_size: 40, locations: Mumbai}
+  - {name: Mobifly, website: mobifly.in, team_size: 40, locations: Mumbai}
+  - {name: SpotPlay, website: spotlight.in, team_size: 30, locations: Mumbai}
+  - {name: Blue Bear Technologies, website: bluebeartech.com, team_size: 30, locations: Mumbai}
+  - {name: Interactive Avenues, website: interactiveavenues.com, team_size: 300, locations: Mumbai}
+  - {name: Kalpita Technologies, website: kalpitatechnologies.com, team_size: 30, locations: Mumbai}
+  - {name: Cloudthat, website: cloudthat.com, team_size: 400, locations: Bangalore}
+  - {name: Tibil Solutions, website: tibilsolutions.com, team_size: 100, locations: Bangalore}
+  - {name: Infobell IT, website: infobellit.com, team_size: 200, locations: Bangalore}
+  - {name: Techjini, website: techjini.com, team_size: 100, locations: Bangalore}
+  - {name: Mobinius Technologies, website: mobinius.com, team_size: 150, locations: Bangalore}
+  - {name: Aptus Data Labs, website: aptusdatalabs.com, team_size: 100, locations: Bangalore}
+  - {name: Knowledgelens, website: knowledgelens.com, team_size: 300, locations: Bangalore}
+  - {name: Zopsmart, website: zopsmart.com, team_size: 600, locations: Bangalore}
+  - {name: Lumiq, website: lumiq.ai, team_size: 250, locations: Noida}
+  - {name: Digit88, website: digit88.com, team_size: 200, locations: Bangalore}
+  - {name: Crayon Data, website: crayondata.com, team_size: 150, locations: Chennai}
+  - {name: Divami Design Labs, website: divami.com, team_size: 100, locations: Hyderabad}
+  - {name: Zenwork, website: zenwork.com, team_size: 300, locations: Hyderabad}
+  - {name: Sagarsoft, website: sagarsoft.in, team_size: 200, locations: Hyderabad}
+  - {name: Tericsoft, website: tericsoft.com, team_size: 60, locations: Hyderabad}
+  - {name: Mobigesture, website: mobigesture.com, team_size: 40, locations: Hyderabad}
+  - {name: Codilar Technologies, website: codilar.com, team_size: 150, locations: Bangalore}
+  - {name: Moback India, website: mobackinc.com, team_size: 40, locations: Bangalore}
+  - {name: DataTheta, website: datatheta.com, team_size: 100, locations: Chennai}
+  - {name: Prutech Solutions, website: prutech.com, team_size: 100, locations: Hyderabad}
+  - {name: Coretegra, website: coretegra.com, team_size: 60, locations: Hyderabad}
+  - {name: Brio Technologies, website: brio-tech.com, team_size: 60, locations: Hyderabad}
+  - {name: Saisystems Technology, website: saisystems.com, team_size: 300, locations: Chennai}
+  - {name: Mavenmagnet, website: mavenmagnet.com, team_size: 40, locations: Delhi}
+  - {name: Vmoksha Technologies, website: vmoksha.com, team_size: 100, locations: Bangalore}
+  - {name: Infinite Locus, website: infinitelocus.com, team_size: 60, locations: Gurgaon}
+  - {name: NetElixir, website: netelixir.com, team_size: 200, locations: Hyderabad}
+  - {name: Tech Tammina, website: techtammina.com, team_size: 300, locations: Hyderabad}
+  - {name: Sails Software, website: sailssoftware.com, team_size: 200, locations: Visakhapatnam}
+  - {name: Pyramid Consulting India, website: pyramidci.com, team_size: 1000, locations: Hyderabad}
+  - {name: Nalashaa, website: nalashaa.com, team_size: 150, locations: Bangalore}
+  - {name: Kenscio Digital, website: kenscio.com, team_size: 100, locations: Bangalore}
+  - {name: Embee Software, website: embee.co.in, team_size: 300, locations: Kolkata}
+  - {name: Neuralbits, website: neuralbits.com, team_size: 30, locations: Bangalore}
+  - {name: Neural Lab, website: neurallabs.in, team_size: 30, locations: Bangalore}
+  - {name: Sumeru Software, website: sumerusolutions.com, team_size: 80, locations: Bangalore}
+  - {name: Galaxe Solutions, website: galaxe.com, team_size: 2000, locations: Bangalore}
+  - {name: Juego Studios, website: juegostudio.com, team_size: 200, locations: Bangalore}
+  - {name: Mobicip, website: mobicip.com, team_size: 40, locations: Chennai}
+  - {name: Haptik Labs, website: hellohaptik.com, team_size: 300, locations: Mumbai}
+  - {name: Tekion India, website: tekion.com, team_size: 3000, locations: Bangalore}
+  - {name: Turtle Shell, website: turtleshelltech.com, team_size: 30, locations: Bangalore}
+  - {name: Blackcoffer, website: blackcoffer.com, team_size: 100, locations: Delhi}
+  - {name: Techversant Labs, website: techversant.com, team_size: 30, locations: Trivandrum}
+  - {name: F22 Labs, website: f22labs.com, team_size: 120, locations: Chennai}
+  - {name: Trigent Software, website: trigent.com, team_size: 1000, locations: Bangalore}
+  - {name: NucleusTeq, website: nucleusteq.com, team_size: 600, locations: Indore}
+  - {name: Excelsoft Technologies, website: excelsoftcorp.com, team_size: 1500, locations: Mysore}
+  - {name: GlowTouch, website: glowtouch.com, team_size: 1000, locations: Mangalore}
+  - {name: Novigo Solutions, website: novigosolutions.com, team_size: 300, locations: Mangalore}
+  - {name: Winman Software, website: winmansoftware.com, team_size: 200, locations: Mangalore}
+  - {name: GyanMatrix, website: gyanmatrix.com, team_size: 100, locations: Bangalore}
+  - {name: Mobilyte, website: mobilyte.com, team_size: 80, locations: Chandigarh}
+  - {name: Esferasoft, website: esferasoft.com, team_size: 60, locations: Mohali}
+  - {name: E2logy, website: e2logy.com, team_size: 40, locations: Noida}
+  # Phase 2h, round 2
+  - {name: Cuelogic, website: cuelogic.com, team_size: 300, locations: Pune}
+  - {name: Vyom Labs, website: vyomlabs.com, team_size: 200, locations: Pune}
+  - {name: Abhyaz, website: abhyaz.com, team_size: 30, locations: Pune}
+  - {name: Sevenmentor, website: sevenmentor.com, team_size: 200, locations: Pune}
+  - {name: Ellipsonic, website: ellipsonic.com, team_size: 30, locations: Pune}
+  - {name: Kasadara, website: kasadara.com, team_size: 40, locations: Pune}
+  - {name: Anant Infomedia, website: anantinfomedia.com, team_size: 30, locations: Pune}
+  - {name: Codemax IT Solutions, website: codemaxit.com, team_size: 30, locations: Pune}
+  - {name: Raja Software Labs, website: rajasoftwarelabs.com, team_size: 100, locations: Pune}
+  - {name: TechHive Labs, website: techhivelabs.com, team_size: 30, locations: Pune}
+  - {name: Nimblechapps, website: nimblechapps.com, team_size: 60, locations: Ahmedabad}
+  - {name: Datamato Technologies, website: datamato.com, team_size: 40, locations: Pune}
+  - {name: Pinnacle Infotech Pune, website: pinnacleinfotech.com, team_size: 300, locations: Durgapur}
+  - {name: Cognitio Analytics, website: cognitioanalytics.com, team_size: 100, locations: Pune}
+  - {name: Vritti Solutions, website: vrittisolutions.com, team_size: 30, locations: Pune}
+  - {name: SPAN Infotech, website: spantechnologyservices.com, team_size: 300, locations: Bangalore}
+  - {name: Tecnics Integration, website: tecnics.com, team_size: 100, locations: Pune}
+  - {name: Shivila Technologies, website: shivila.com, team_size: 30, locations: Pune}
+  - {name: Apptware, website: apptware.com, team_size: 80, locations: Pune}
+  - {name: Sync Technologies, website: synctechno.com, team_size: 30, locations: Pune}
+  - {name: Dexcode Technologies, website: dexcode.com, team_size: 30, locations: Pune}
+  - {name: Gammastack, website: gammastack.com, team_size: 150, locations: Noida}
+  - {name: Cyberlinks, website: cyberlinks.co.in, team_size: 30, locations: Pune}
+  - {name: Rohkun Systems, website: rohkunsystems.com, team_size: 30, locations: Pune}
+  - {name: Deqode, website: deqode.com, team_size: 400, locations: Indore}
+  - {name: Amazatic Solutions, website: amazatic.com, team_size: 60, locations: Pune}
+  - {name: Saturn Labs, website: saturnlabs.in, team_size: 30, locations: Pune}
+  - {name: Seamless Digital, website: seamlessdigital.in, team_size: 30, locations: Pune}
+  - {name: Zeal Tech, website: zealtechnologies.in, team_size: 30, locations: Pune}
+  - {name: Concept Infoway, website: conceptinfoway.net, team_size: 40, locations: Ahmedabad}
+  - {name: Galaxy Infotech, website: galaxyinfotech.co, team_size: 30, locations: Ahmedabad}
+  - {name: Digisoft Solutions, website: digisoftsolution.com, team_size: 60, locations: Ahmedabad}
+  - {name: Cearsoft, website: cearsoft.com, team_size: 30, locations: Ahmedabad}
+  - {name: Panacea Infotech, website: panaceatek.com, team_size: 60, locations: Ahmedabad}
+  - {name: Shineinfosoft, website: shineinfosoft.com, team_size: 30, locations: Ahmedabad}
+  - {name: AppsTechy, website: appstechy.com, team_size: 40, locations: Ahmedabad}
+  - {name: Inventyv Software, website: inventyv.com, team_size: 40, locations: Ahmedabad}
+  - {name: Sapphire Infocom, website: sapphireinfocom.com, team_size: 30, locations: Ahmedabad}
+  - {name: Hexagon Solutions, website: hexagonsoft.in, team_size: 30, locations: Ahmedabad}
+  - {name: Krishang Technolab, website: krishangtechnolab.com, team_size: 40, locations: Ahmedabad}
+  - {name: Shiv Technolabs, website: shivlab.com, team_size: 60, locations: Ahmedabad}
+  - {name: ManekTech, website: manektech.com, team_size: 200, locations: Ahmedabad}
+  - {name: Tech Extensor, website: techextensor.com, team_size: 40, locations: Ahmedabad}
+  - {name: Kanhasoft, website: kanhasoft.com, team_size: 60, locations: Ahmedabad}
+  - {name: iMobDev Technologies, website: imobdevtech.com, team_size: 60, locations: Ahmedabad}
+  - {name: Wappnet Systems, website: wappnet.com, team_size: 60, locations: Ahmedabad}
+  - {name: Pixel Web Solutions, website: pixelwebsolutions.com, team_size: 40, locations: Jaipur}
+  - {name: Coruscate Solutions, website: coruscatesolution.com, team_size: 40, locations: Ahmedabad}
+  - {name: Excelsior Technologies, website: excelsiortechnologies.com, team_size: 30, locations: Ahmedabad}
+  - {name: Codexoxo, website: codexoxo.com, team_size: 30, locations: Ahmedabad}
+  - {name: Arham Web Works, website: arhamwebworks.com, team_size: 30, locations: Ahmedabad}
+  - {name: Vasundhara Infotech, website: vasundhara.io, team_size: 100, locations: Surat}
+  - {name: Dynamic Dreamz, website: dynamicdreamz.com, team_size: 40, locations: Surat}
+  - {name: Arrowhead Technologies, website: arrowheadtech.in, team_size: 30, locations: Surat}
+  - {name: Mobmaxime, website: mobmaxime.com, team_size: 60, locations: Ahmedabad}
+  - {name: ThinkWik, website: thinkwik.com, team_size: 40, locations: Ahmedabad}
+  - {name: Akhil Systems, website: akhilsystems.com, team_size: 30, locations: Ahmedabad}
+  - {name: Ecotech IT Solutions, website: ecotechitsolutions.com, team_size: 30, locations: Ahmedabad}
+  - {name: Gateway Group, website: gatewaygroup.com, team_size: 300, locations: Ahmedabad}
+  - {name: Cybercom Creation, website: cybercomcreation.com, team_size: 40, locations: Ahmedabad}
+  - {name: Tecocraft, website: tecocraft.com, team_size: 30, locations: Ahmedabad}
+  - {name: Dreamsoft4u, website: dreamsoft4u.com, team_size: 100, locations: Jaipur}
+  - {name: Kalpvaig, website: kalpvaig.com, team_size: 30, locations: Jaipur}
+  - {name: Ideafoundation, website: ideafoundation.in, team_size: 60, locations: Jaipur}
+  - {name: Hashtag Systems, website: hashtagsystems.com, team_size: 40, locations: Jaipur}
+  - {name: Kanak Infosystems, website: kanakinfosystems.com, team_size: 60, locations: Jaipur}
+  - {name: Brainpulse, website: brainpulse.com, team_size: 30, locations: Delhi}
+  - {name: Techvoot Solutions, website: techvoot.com, team_size: 30, locations: Surat}
+  - {name: iWeb Technology, website: iwebtechno.com, team_size: 40, locations: Jaipur}
+  - {name: Techinfini Solutions, website: techinfini.com, team_size: 30, locations: Indore}
+  - {name: Vision Infotech, website: visioninfotech.net, team_size: 30, locations: Indore}
+  - {name: Vihaan Infotech, website: vihaaninfotech.com, team_size: 30, locations: Indore}
+  - {name: Agile Soft Systems, website: agilesoftsystems.com, team_size: 30, locations: Indore}
+  - {name: Smartzminds, website: smartzminds.com, team_size: 30, locations: Mohali}
+  - {name: Panzer Technologies, website: panzertechnologies.com, team_size: 30, locations: Mohali}
+  - {name: Xcelance, website: xcelance.com, team_size: 40, locations: Mohali}
+  - {name: Infowiz Software, website: infowiz.co.in, team_size: 30, locations: Mohali}
+  - {name: Solitaire Infosys, website: solitaireinfosys.com, team_size: 100, locations: Mohali}
+  - {name: Innovaccer Labs, website: innovationm.com, team_size: 150, locations: Noida}
+  - {name: Iris Labs, website: irisidea.com, team_size: 30, locations: Bangalore}
+  - {name: Cogniter Technologies, website: cogniter.com, team_size: 100, locations: Chandigarh}
+  - {name: Daffodil Labs, website: daffodilinfo.com, team_size: 30, locations: Noida}
+  - {name: Brain Inventory, website: braininventory.com, team_size: 60, locations: Indore}
+  - {name: Codeplateau, website: codeplateau.com, team_size: 30, locations: Noida}
+  - {name: Hestabit, website: hestabit.com, team_size: 60, locations: Noida}
+  - {name: Sterco Digitex, website: stercodigitex.com, team_size: 100, locations: Delhi}
+  - {name: Cyberspace Technologies, website: cyberspacetech.in, team_size: 30, locations: Delhi}
+  - {name: Mindz Technology, website: mindztechnology.com, team_size: 30, locations: Noida}
+  - {name: Techinnover, website: techinnover.com, team_size: 30, locations: Noida}
+  - {name: Bhavna Corp, website: bhavnacorp.com, team_size: 300, locations: Noida}
+  - {name: ThoughtFocus, website: thoughtfocus.com, team_size: 1000, locations: Bangalore}
+  - {name: Simpalm India, website: simpalm.com, team_size: 60, locations: Delhi}
+  - {name: Akal Information Systems, website: akalinfo.com, team_size: 200, locations: Delhi}
+  - {name: Ospyn Technologies, website: ospyn.com, team_size: 100, locations: Trivandrum}
+  - {name: Bitpastel, website: bitpastel.com, team_size: 40, locations: Kolkata}
+  - {name: Codeace Technologies, website: codeace.com, team_size: 40, locations: Kozhikode}
+  - {name: Inapp Information Technologies, website: inapp.com, team_size: 900, locations: Trivandrum}
+  - {name: Neologix, website: neologixtech.com, team_size: 30, locations: Kochi}
+  - {name: CloudCodes, website: cloudcodes.com, team_size: 60, locations: Pune}
+  - {name: Mallow Labs, website: mallowtech.com, team_size: 30, locations: Karur}
+  - {name: Atomlogik, website: atomlogik.com, team_size: 30, locations: Chennai}
+  - {name: Optisol Labs, website: optisolbusiness.in, team_size: 30, locations: Chennai}
+  - {name: Zaigo Infotech, website: zaigoinfotech.com, team_size: 60, locations: Chennai}
+  - {name: Digital Shark Technology, website: digitalsharktech.com, team_size: 30, locations: Chennai}
 
 # Phase 2g: mid-size Indian product / SaaS companies (about 50-2000 people, engineering in India), sector saas.
 # Verified on their own website (names it, India signal, MX, product words on the homepage). team_size is an
@@ -675,6 +1155,155 @@ saas:
   - {name: Chalo, website: chalo.com, team_size: 500, locations: Mumbai}
   - {name: Park+, website: parkplus.io, team_size: 600, locations: Gurgaon}
   - {name: Truminds Software Systems, website: truminds.com, team_size: 300, locations: Gurgaon}
+  # Phase 2h: more mid-size product / SaaS companies with engineering in India (prioritised cities: Pune, Ahmedabad, Kochi, Jaipur, Indore, Chandigarh / Mohali,
+  # Coimbatore, Bhubaneswar, Kolkata, Noida; plus big-city firms not stored yet). team_size approximate.
+  - {name: Kapture CX, website: kapturecx.com, team_size: 300, locations: Bangalore}
+  - {name: Frappe, website: frappe.io, team_size: 100, locations: Mumbai}
+  - {name: MyOperator, website: myoperator.com, team_size: 300, locations: Noida}
+  - {name: Servetel, website: servetel.in, team_size: 150, locations: Noida}
+  - {name: Vinculum, website: vinculumgroup.com, team_size: 500, locations: Noida}
+  - {name: EasyEcom, website: easyecom.io, team_size: 150, locations: Gurgaon}
+  - {name: Ginesys, website: ginesys.in, team_size: 400, locations: Kolkata}
+  - {name: Busy Infotech, website: busy.in, team_size: 600, locations: Delhi}
+  - {name: SigTuple, website: sigtuple.com, team_size: 150, locations: Bangalore}
+  - {name: Tricog, website: tricog.com, team_size: 200, locations: Bangalore}
+  - {name: Skillate, website: skillate.com, team_size: 60, locations: Bangalore}
+  - {name: Dyte, website: dyte.io, team_size: 100, locations: Bangalore}
+  - {name: 100ms, website: 100ms.live, team_size: 150, locations: Bangalore}
+  - {name: Hoppscotch, website: hoppscotch.com, team_size: 30, locations: Bangalore}
+  - {name: Requestly, website: requestly.com, team_size: 30, locations: Bangalore}
+  - {name: SuperTokens, website: supertokens.com, team_size: 20, locations: Mumbai}
+  - {name: RudderStack, website: rudderstack.com, team_size: 200, locations: Bangalore}
+  - {name: Safe Security, website: safe.security, team_size: 400, locations: Bangalore}
+  - {name: Kratikal, website: kratikal.com, team_size: 150, locations: Noida}
+  - {name: Arcon, website: arconnet.com, team_size: 400, locations: Mumbai}
+  - {name: DataWeave, website: dataweave.com, team_size: 200, locations: Bangalore}
+  - {name: SaaS Labs, website: saaslabs.co, team_size: 300, locations: Gurgaon}
+  - {name: Testbook, website: testbook.com, team_size: 500, locations: Mumbai}
+  - {name: Embibe, website: embibe.com, team_size: 400, locations: Bangalore}
+  - {name: Cuemath, website: cuemath.com, team_size: 800, locations: Bangalore}
+  - {name: Masai School, website: masaischool.com, team_size: 300, locations: Bangalore}
+  - {name: WorkIndia, website: workindia.in, team_size: 300, locations: Mumbai}
+  - {name: Treebo, website: treebo.com, team_size: 600, locations: Bangalore}
+  - {name: Inshorts, website: inshorts.com, team_size: 200, locations: Noida}
+  - {name: Kuku FM, website: kukufm.com, team_size: 300, locations: Mumbai}
+  - {name: WinZO, website: winzogames.com, team_size: 300, locations: Delhi}
+  - {name: RentoMojo, website: rentomojo.com, team_size: 300, locations: Bangalore}
+  - {name: Ixigo, website: ixigo.com, team_size: 600, locations: Gurgaon}
+  - {name: RateGain, website: rategain.com, team_size: 700, locations: Noida}
+  - {name: Zycus, website: zycus.com, team_size: 1200, locations: Mumbai}
+  - {name: HighRadius, website: highradius.com, team_size: 3000, locations: Hyderabad}
+  - {name: Sprinklr, website: sprinklr.com, team_size: 3000, locations: Gurgaon}
+  - {name: Freshworks, website: freshworks.com, team_size: 5000, locations: Chennai}
+  - {name: Zoho, website: zoho.com, team_size: 15000, locations: Chennai}
+  - {name: Wingman by Clari, website: clari.com, team_size: 800, locations: Bangalore}
+  - {name: Kenyt AI, website: kenyt.ai, team_size: 30, locations: Bangalore}
+  - {name: Uolo, website: uolo.com, team_size: 200, locations: Delhi}
+  - {name: LeadSchool, website: leadschool.in, team_size: 1000, locations: Mumbai}
+  - {name: Simplotel, website: simplotel.com, team_size: 150, locations: Bangalore}
+  - {name: Hotelogix, website: hotelogix.com, team_size: 200, locations: Bangalore}
+  - {name: Cars24 Tech, website: cars24.com, team_size: 5000, locations: Gurgaon}
+  - {name: Agrostar, website: agrostar.in, team_size: 1000, locations: Pune}
+  - {name: Bijak, website: bijak.in, team_size: 200, locations: Gurgaon}
+  - {name: Jumbotail, website: jumbotail.com, team_size: 300, locations: Bangalore}
+  - {name: Moglix, website: moglix.com, team_size: 2000, locations: Noida}
+  - {name: Bizongo, website: bizongo.com, team_size: 600, locations: Mumbai}
+  - {name: Kale Logistics, website: kalelogistics.com, team_size: 300, locations: Mumbai}
+  - {name: Fleetx, website: fleetx.io, team_size: 300, locations: Gurgaon}
+  - {name: LocoNav, website: loconav.com, team_size: 400, locations: Gurgaon}
+  - {name: Trukky, website: trukky.com, team_size: 100, locations: Delhi}
+  - {name: Blowhorn, website: blowhorn.com, team_size: 200, locations: Bangalore}
+  - {name: Shadowfax Tech, website: shadowfax.in, team_size: 2000, locations: Bangalore}
+  - {name: Pharmeasy, website: pharmeasy.in, team_size: 3000, locations: Mumbai}
+  - {name: Mfine, website: mfine.co, team_size: 200, locations: Bangalore}
+  - {name: Wysa, website: wysa.com, team_size: 100, locations: Bangalore}
+  - {name: Healthians, website: healthians.com, team_size: 1500, locations: Gurgaon}
+  - {name: Docprime, website: docprime.com, team_size: 100, locations: Gurgaon}
+  - {name: CureBay, website: curebay.com, team_size: 200, locations: Bhubaneswar}
+  - {name: Cogoport, website: cogoport.com, team_size: 800, locations: Mumbai}
+  - {name: GreyOrange, website: greyorange.com, team_size: 1000, locations: Gurgaon}
+  - {name: Bounce, website: bounceshare.com, team_size: 300, locations: Bangalore}
+  - {name: Smartstaff, website: smartstaff.app, team_size: 30, locations: Bangalore}
+  - {name: Kuvera Tech, website: kuvera.in, team_size: 100, locations: Bangalore}
+  - {name: Netradyne, website: netradyne.com, team_size: 1000, locations: Bangalore}
+  - {name: Mindler, website: mindler.com, team_size: 150, locations: Delhi}
+  - {name: Leverage Edu, website: leverageedu.com, team_size: 600, locations: Delhi}
+  - {name: Newton School, website: newtonschool.co, team_size: 300, locations: Bangalore}
+  - {name: Scaler, website: scaler.com, team_size: 1500, locations: Bangalore}
+  - {name: Coding Ninjas, website: codingninjas.com, team_size: 600, locations: Delhi}
+  - {name: GeeksforGeeks, website: geeksforgeeks.org, team_size: 600, locations: Noida}
+  - {name: Adda247, website: adda247.com, team_size: 1500, locations: Gurgaon}
+  - {name: Doubtnut, website: doubtnut.com, team_size: 300, locations: Gurgaon}
+  - {name: Qapita, website: qapita.com, team_size: 150, locations: Hyderabad}
+  - {name: Instoried, website: instoried.com, team_size: 30, locations: Bangalore}
+  - {name: Kirana Club, website: kiranaclub.com, team_size: 80, locations: Delhi}
+  - {name: Dukaan, website: mydukaan.io, team_size: 100, locations: Bangalore}
+  - {name: Bikayi, website: bikayi.com, team_size: 50, locations: Bangalore}
+  - {name: Rapidor, website: rapidor.co, team_size: 40, locations: Bangalore}
+  - {name: Zipteams, website: zipteams.com, team_size: 30, locations: Pune}
+  - {name: Quixy, website: quixy.com, team_size: 100, locations: Hyderabad}
+  - {name: Kapsule, website: kapsule.co, team_size: 30, locations: Mumbai}
+  - {name: Engati, website: engati.com, team_size: 200, locations: Mumbai}
+  - {name: AiSensy, website: aisensy.com, team_size: 150, locations: Gurgaon}
+  - {name: Pazcare, website: pazcare.com, team_size: 150, locations: Bangalore}
+  - {name: Rocket Health, website: rockethealth.app, team_size: 100, locations: Bangalore}
+  - {name: Glamplus, website: glamplus.in, team_size: 40, locations: Delhi}
+  - {name: Sporfy, website: sporfy.com, team_size: 30, locations: Bangalore}
+  - {name: Zinier, website: zinier.com, team_size: 200, locations: Bangalore}
+  - {name: Mindpeers, website: mindpeers.co, team_size: 50, locations: Delhi}
+  - {name: Paperflite, website: paperflite.com, team_size: 60, locations: Chennai}
+  - {name: Freightify, website: freightify.com, team_size: 100, locations: Chennai}
+  - {name: Vitraya, website: vitraya.com, team_size: 200, locations: Bangalore}
+  - {name: Uptiq, website: uptiq.ai, team_size: 200, locations: Bangalore}
+  - {name: Gyan AI, website: gyan.ai, team_size: 30, locations: Bangalore}
+  - {name: MirrorFly, website: mirrorfly.com, team_size: 300, locations: Chennai}
+  - {name: ITILITE, website: itilite.com, team_size: 400, locations: Bangalore}
+  - {name: Spendflo, website: spendflo.com, team_size: 150, locations: Chennai}
+  - {name: SoftwareSuggest, website: softwaresuggest.com, team_size: 200, locations: Ahmedabad}
+  # Phase 2h, round 2
+  - {name: Squadcast, website: squadcast.com, team_size: 150, locations: Bangalore}
+  - {name: FlytBase, website: flytbase.com, team_size: 150, locations: Pune}
+  - {name: Vtiger, website: vtiger.com, team_size: 300, locations: Bangalore}
+  - {name: Orangescrum, website: orangescrum.com, team_size: 30, locations: Bhubaneswar}
+  - {name: Bizom, website: bizom.com, team_size: 400, locations: Bangalore}
+  - {name: Salesbox, website: salesboxai.com, team_size: 30, locations: Bangalore}
+  - {name: Sarv, website: sarv.com, team_size: 100, locations: Jaipur}
+  - {name: TrackOlap, website: trackolap.com, team_size: 60, locations: Gurgaon}
+  - {name: Qandle, website: qandle.com, team_size: 100, locations: Gurgaon}
+  - {name: Zimyo, website: zimyo.com, team_size: 150, locations: Gurgaon}
+  - {name: factoHR, website: factohr.com, team_size: 100, locations: Ahmedabad}
+  - {name: Pocket HRMS, website: pockethrms.com, team_size: 100, locations: Mumbai}
+  - {name: sumHR, website: sumhr.com, team_size: 30, locations: Mumbai}
+  - {name: HROne, website: hrone.cloud, team_size: 200, locations: Noida}
+  - {name: Spine HR, website: spinehr.in, team_size: 150, locations: Mumbai}
+  - {name: Akrivia HCM, website: akriviahcm.com, team_size: 100, locations: Hyderabad}
+  - {name: Pagarbook, website: pagarbook.com, team_size: 100, locations: Bangalore}
+  - {name: Refrens, website: refrens.com, team_size: 60, locations: Surat}
+  - {name: Giddh, website: giddh.com, team_size: 60, locations: Indore}
+  - {name: Kredily, website: kredily.com, team_size: 60, locations: Bangalore}
+  - {name: Synergita, website: synergita.com, team_size: 60, locations: Chennai}
+  - {name: Mobilise App Lab, website: mobiliseapps.com, team_size: 30, locations: Bangalore}
+  - {name: Wizcommerce India, website: wizcommerce.com, team_size: 100, locations: Bangalore}
+  - {name: Edgistify, website: edgistify.com, team_size: 100, locations: Gurgaon}
+  - {name: Shipway, website: shipway.com, team_size: 60, locations: Delhi}
+  - {name: Clickpost, website: clickpost.ai, team_size: 150, locations: Bangalore}
+  - {name: NimbusPost, website: nimbuspost.com, team_size: 150, locations: Delhi}
+  - {name: Pickrr, website: pickrr.com, team_size: 100, locations: Delhi}
+  - {name: iThink Logistics, website: ithinklogistics.com, team_size: 100, locations: Mumbai}
+  - {name: DoubleTick, website: doubletick.io, team_size: 60, locations: Bangalore}
+  - {name: BotPenguin, website: botpenguin.com, team_size: 60, locations: Delhi}
+  - {name: Kommunicate, website: kommunicate.io, team_size: 50, locations: Bangalore}
+  - {name: Helpshift, website: helpshift.com, team_size: 300, locations: Pune}
+  - {name: Graphy, website: graphy.com, team_size: 150, locations: Bangalore}
+  - {name: Edmingle, website: edmingle.com, team_size: 40, locations: Bangalore}
+  - {name: Entri, website: entri.app, team_size: 300, locations: Kochi}
+  - {name: Xylem Learning, website: xylem.org.in, team_size: 200, locations: Kozhikode}
+  - {name: Codeyoung, website: codeyoung.com, team_size: 100, locations: Bangalore}
+  - {name: Crio, website: crio.do, team_size: 200, locations: Bangalore}
+  - {name: AlmaBetter, website: almabetter.com, team_size: 150, locations: Bangalore}
+  - {name: Unstop, website: unstop.com, team_size: 200, locations: Delhi}
+  - {name: Superset Labs, website: joinsuperset.com, team_size: 150, locations: Bangalore}
+  - {name: Cutshort, website: cutshort.io, team_size: 100, locations: Bangalore}
 
 # Phase 2g: Indian fintechs (payments, lending, wealth, insurance, infra), sector fintech; same verification.
 fintech_seeds:
@@ -742,3 +1371,65 @@ fintech_seeds:
   - {name: Kiwi, website: gokiwi.in, team_size: 100, locations: Bangalore}
   - {name: Paytail, website: paytail.com, team_size: 100, locations: Delhi}
   - {name: Snapmint, website: snapmint.com, team_size: 300, locations: Mumbai}
+  # Phase 2h: more fintechs (prioritised cities: Pune, Ahmedabad, Kochi, Jaipur, Indore, Chandigarh / Mohali,
+  # Coimbatore, Bhubaneswar, Kolkata, Noida; plus big-city firms not stored yet). team_size approximate.
+  - {name: Fisdom, website: fisdom.com, team_size: 300, locations: Bangalore}
+  - {name: InsuranceDekho, website: insurancedekho.com, team_size: 2000, locations: Gurgaon}
+  - {name: LoanTap, website: loantap.in, team_size: 300, locations: Pune}
+  - {name: FamApp, website: famapp.in, team_size: 200, locations: Bangalore}
+  - {name: Faircent, website: faircent.com, team_size: 150, locations: Gurgaon}
+  - {name: Dezerv, website: dezerv.in, team_size: 300, locations: Mumbai}
+  - {name: Grip Invest, website: gripinvest.in, team_size: 100, locations: Gurgaon}
+  - {name: Upstox, website: upstox.com, team_size: 1500, locations: Mumbai}
+  - {name: ClearTax, website: cleartax.in, team_size: 1500, locations: Bangalore}
+  - {name: Jar, website: myjar.app, team_size: 300, locations: Bangalore}
+  - {name: MobiKwik, website: mobikwik.com, team_size: 1000, locations: Gurgaon}
+  - {name: Kotak Cherry, website: kotakcherry.com, team_size: 300, locations: Mumbai}
+  - {name: Nuvama Wealth, website: nuvamawealth.com, team_size: 3000, locations: Mumbai}
+  - {name: Neokred, website: neokred.tech, team_size: 100, locations: Bangalore}
+  - {name: Falcon, website: falconfs.com, team_size: 100, locations: Bangalore}
+  - {name: Paymeindia, website: paymeindia.in, team_size: 100, locations: Delhi}
+  - {name: Velocity, website: velocity.in, team_size: 100, locations: Bangalore}
+  - {name: Klub, website: klub.work, team_size: 80, locations: Bangalore}
+  - {name: N7 Finance, website: n7.finance, team_size: 40, locations: Bangalore}
+  - {name: Aspora, website: aspora.com, team_size: 100, locations: Bangalore}
+  - {name: Kodo, website: kodo.in, team_size: 100, locations: Bangalore}
+  - {name: Precisa, website: precisa.in, team_size: 40, locations: Gurgaon}
+  - {name: Tartan, website: tartanhq.com, team_size: 60, locations: Bangalore}
+  - {name: Anumati, website: anumati.co.in, team_size: 30, locations: Pune}
+  - {name: Yap, website: yap.com, team_size: 100, locations: Bangalore}
+  - {name: Pinelabs Plural, website: pluralonline.com, team_size: 300, locations: Noida}
+  - {name: Moneyhop, website: moneyhop.co, team_size: 60, locations: Bangalore}
+  - {name: Fairmoney India, website: fairmoney.in, team_size: 200, locations: Bangalore}
+  - {name: Arya.ag, website: arya.ag, team_size: 300, locations: Noida}
+  - {name: Ummeed Housing, website: ummeedhfc.com, team_size: 300, locations: Gurgaon}
+  - {name: Nimbbl, website: nimbbl.biz, team_size: 40, locations: Mumbai}
+  - {name: Finarkein Analytics, website: finarkein.com, team_size: 40, locations: Mumbai}
+  - {name: IDcentral, website: idcentral.io, team_size: 30, locations: Mumbai}
+  # Phase 2h, round 2
+  - {name: Sarvatra Technologies, website: sarvatra.in, team_size: 200, locations: Pune}
+  - {name: Kiya.ai, website: kiya.ai, team_size: 400, locations: Mumbai}
+  - {name: Profectus Capital, website: profectuscapital.com, team_size: 300, locations: Mumbai}
+  - {name: TaxBuddy, website: taxbuddy.com, team_size: 100, locations: Mumbai}
+  - {name: Finology, website: finology.in, team_size: 100, locations: Raipur}
+  - {name: Roinet, website: roinet.in, team_size: 200, locations: Delhi}
+  - {name: RapiPay, website: rapipay.com, team_size: 500, locations: Noida}
+  - {name: Fintoo, website: fintoo.in, team_size: 60, locations: Mumbai}
+  - {name: Wealthy, website: wealthy.in, team_size: 150, locations: Bangalore}
+  - {name: Mprofit, website: mprofit.in, team_size: 60, locations: Mumbai}
+  - {name: Investyadnya, website: investyadnya.in, team_size: 30, locations: Mumbai}
+  - {name: Easiloan, website: easiloan.com, team_size: 60, locations: Mumbai}
+  - {name: Credright, website: credright.com, team_size: 100, locations: Delhi}
+  - {name: Kinara Capital, website: kinaracapital.com, team_size: 1000, locations: Bangalore}
+  - {name: Finzy, website: finzy.com, team_size: 30, locations: Bangalore}
+  - {name: Cointab, website: cointab.in, team_size: 60, locations: Mumbai}
+  - {name: Bluecopa, website: bluecopa.com, team_size: 100, locations: Bangalore}
+  - {name: Cashflo, website: cashflo.io, team_size: 150, locations: Mumbai}
+  - {name: Credlix, website: credlix.com, team_size: 100, locations: Gurgaon}
+  - {name: Ezeepay, website: ezeepay.in, team_size: 60, locations: Delhi}
+  - {name: PayKun, website: paykun.com, team_size: 40, locations: Ahmedabad}
+  - {name: Zaakpay, website: zaakpay.com, team_size: 60, locations: Gurgaon}
+  - {name: Phi Commerce, website: phicommerce.com, team_size: 200, locations: Pune}
+  - {name: Paydeck, website: paydeck.in, team_size: 30, locations: Bangalore}
+  - {name: Aye Finance, website: ayefin.com, team_size: 3000, locations: Gurgaon}
+

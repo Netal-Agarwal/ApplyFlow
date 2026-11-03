@@ -47,6 +47,7 @@ Phase 3 sends through the Gmail API (`send`); before it, you sent from Gmail and
 from __future__ import annotations
 
 import argparse
+from datetime import date
 import json
 import sys
 from pathlib import Path
@@ -186,7 +187,11 @@ def cmd_contacts(args, profile, store) -> int:
     names = store.known_first_names()          # 2f: evidence for guesses (a published 'rahul@' shows first@)
     roles = sum(t.kind == "role" for t in targets)
     from applyflow.contacts import pending_targets
-    if args.deep:
+    if args.wide:
+        batch, pending = wide_targets(store, profile, targets, args.limit)
+        print(f"Wide search (2h): {len(pending)} target(s) with a named person but no sendable address; "
+              f"this batch {len(batch)}.")
+    elif args.deep:
         batch, pending = deep_targets(store, profile, targets, args.limit)
         print(f"Deep search (2e): {len(pending)} target(s) with no safe contact (none, info@ / contact@ only, guessed "
               f"or an unrecognised address); this batch {len(batch)}.")
@@ -212,8 +217,15 @@ def cmd_contacts(args, profile, store) -> int:
         if manual is not None and manual["email"]:
             store.save_contact_result(manual_result(target, manual))     # given by hand: no lookup
             continue
-        result = find_contacts(client, target, profile, dnc, github, log=print, mx=mx, deep=args.deep, names=names)
-        if args.deep and any(r.startswith("website (deep): read 0 page(s)") for r in result.reasons) \
+        result = find_contacts(client, target, profile, dnc, github, log=print, mx=mx, deep=args.deep, names=names,
+                               wide=args.wide)
+        if args.wide and not wide_improved(result) and store.contacts_for(target.key):
+            # 2h: the wide search found nothing sendable: keep what was stored (a failed YC page mustn't drop a
+            # founder's guess), only note that it ran
+            store.set_state(f"wide:{target.key}", f"{date.today()}: nothing sendable; " + "; ".join(result.reasons[:1]))
+            print("    kept the stored contacts: nothing sendable found")
+        elif (args.deep or args.wide) and any(r.startswith(("website (deep): read 0 page(s)",
+                                                          "website (wide): read 0 page(s)")) for r in result.reasons) \
                 and store.contacts_for(target.key):
             print(f"    kept the stored contacts: the site couldn't be read now")
         else:
@@ -232,6 +244,39 @@ def cmd_contacts(args, profile, store) -> int:
         f"{k}={counts.get(k, 0)}" for k in ("verified", "strong", "published_inbox", "guessed", "fallback", "none", "apply_only", "no_domain")))
     print(f"Written: {write_contacts_csv(store, Path(args.out) / 'contacts.csv')}")
     return 0
+
+
+def wide_improved(result) -> bool:
+    """2h: did a wide lookup find a sendable address (named person, founders@, hiring inbox, evidence guess, hello@)?"""
+    from applyflow.outreach import SENDABLE_KINDS, contact_kind
+    return any(contact_kind(c.email, c.confidence, c.source_url, c.name, c.source, c.evidence or None, c.role)
+               in SENDABLE_KINDS for c in result.contacts)
+
+
+def wide_targets(store, profile, targets, limit: int = 0):
+    """2h: unprotected targets with a named founder / CTO / eng lead / recruiter but no sendable address (a pure
+    pattern guess, an unrecognised or unsendable address, or none) that pass the India / tech checks and aren't
+    large; never wide-searched before."""
+    import re
+    from applyflow.outreach import SENDABLE_KINDS, build_items
+    items = {it.company_key: it for it in build_items(store, profile, _dnc())}
+    done = {r[0] for r in store.conn.execute(
+        "SELECT company_key FROM contact_checks WHERE details LIKE '%website (wide)%'")}
+    done |= {r[0][5:] for r in store.conn.execute("SELECT key FROM app_state WHERE key LIKE 'wide:%'")}
+    hiring_title = re.compile(r"founder|ceo|cto|chief|head|vp|director|lead|recruit|talent|\bhr\b|people", re.I)
+    named = {r["company_key"]: any(hiring_title.search(p.get("role", ""))
+                                   for p in json.loads(r["details"] or "{}").get("people", []))
+             for r in store.contact_checks()}
+    pending = []
+    for t in targets:
+        it = items.get(t.key)
+        if it is None or it.protected or it.large or it.fit_hold or t.key in done or not t.domain \
+                or not named.get(t.key):
+            continue
+        if it.status in ("no_contact", "unsendable") or (it.status == "ready" and (
+                it.address is None or it.address.kind not in SENDABLE_KINDS)):
+            pending.append(t)
+    return (pending[:limit] if limit else pending), pending
 
 
 def deep_targets(store, profile, targets, limit: int = 0):
@@ -418,6 +463,10 @@ def cmd_supply(args, profile, store) -> int:
         source, cfg_key = supply.SEED_SECTORS[sector][:2]
         seeds = sources.get(cfg_key) or []
         fresh = [s for s in seeds if site_domain(company_website(str(s["website"]))) not in in_pool]   # 2g
+        if args.shard:                             # 2h: "i/n" - verify seeds in parallel runs
+            import zlib
+            k, n = (int(x) for x in args.shard.split("/"))
+            fresh = [s for s in fresh if zlib.crc32(site_domain(company_website(str(s["website"]))).encode()) % n == k]
         print(f"{cfg_key} seeds ({len(seeds)}; {len(seeds) - len(fresh)} already in the pool, kept as they are)...")
         got, stats = supply.collect_seeds(client, mx, fresh, profile, sector, log=print)
         found += got
@@ -494,6 +543,21 @@ def cmd_referrals(args, profile, store) -> int:
     rows = referral_rows(store, profile, build_items(store, profile, _dnc()))
     path = write_referrals(rows, Path(args.out) / "referrals.csv")
     print(f"{len(rows)} referral row(s) written to {path} (send the LinkedIn notes yourself).")
+    return 0
+
+
+def cmd_direct_apply(args, profile, store) -> int:
+    """2h: output/direct_apply.csv - fitting roles at large / form-only companies and stopped-inbox companies."""
+    from applyflow.direct_apply import build_direct_apply, write_direct_apply
+    from applyflow.outreach import build_items
+    items = build_items(store, profile, _dnc())
+    print("Reading each company's own board / careers page (robots.txt, 1 request/second/host)...")
+    rows, stats = build_direct_apply(store, _client(profile, args.min_interval), profile, items, log=print)
+    path = write_direct_apply(rows, Path(args.out) / "direct_apply.csv")
+    print(f"{stats['companies']} companies checked, {stats['with_roles']} with a fitting role; {len(rows)} row(s) "
+          f"written to {path}.")
+    for r in rows[:10]:
+        print(f"  {r.company:<24} {r.role_title[:44]:<44} {r.location[:24]:<24} {r.posted or '-':<10} {r.apply_link}")
     return 0
 
 
@@ -1221,6 +1285,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="2e: read more pages (team, about-us, careers, jobs, join, contact, privacy, terms, footer "
                         "links) for targets with no safe contact (2f: and new targets never looked up)")
     p.add_argument("--shard", help="2f: i/n - only targets whose key hashes to i of n (parallel runs)")
+    p.add_argument("--wide", action="store_true",
+                   help="2h: up to 25 of the site's own pages from its sitemap and links (blog, press, events, "
+                        "careers detail pages, linked PDFs) for targets with a named person but no sendable address")
     p.add_argument("--out", default=str(config.OUTPUT_DIR))
     p.set_defaults(func=cmd_contacts)
 
@@ -1386,6 +1453,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="2g: YC fintechs headquartered abroad whose own site shows an office / engineering in India")
     p.add_argument("--date", help="as of this day (YYYY-MM-DD, default today)")
     p.add_argument("--target-size", type=int, default=0, help="targets to select this run (default pool.target_size)")
+    p.add_argument("--shard", help="2h: i/n - only seeds whose domain hashes to i of n (parallel runs)")
     p.set_defaults(func=cmd_supply)
 
     sub.add_parser("guess-evidence", help="2f: mark stored guesses that evidence backs (offline)"
@@ -1396,6 +1464,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("referrals", help="2f: output/referrals.csv for large / apply-only companies with a fit role")
     p.add_argument("--out", default=str(config.OUTPUT_DIR))
     p.set_defaults(func=cmd_referrals)
+
+    p = sub.add_parser("direct-apply", help="2h: output/direct_apply.csv - roles to apply for at large / form-only "
+                                            "companies (and companies whose inbox bounced)")
+    p.add_argument("--out", default=str(config.OUTPUT_DIR))
+    p.set_defaults(func=cmd_direct_apply)
 
     p = sub.add_parser("discover", help="find hiring startups and their job boards automatically")
     p.add_argument("--limit", type=int, default=40, help="companies to check this run (default 40)")
